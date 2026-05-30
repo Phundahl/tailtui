@@ -27,9 +27,12 @@ A lightweight, keyboard-driven **terminal UI for Tailscale**, with a high-densit
 - [bubbles](https://github.com/charmbracelet/bubbles) — `list` for the peer pane (navigation + fuzzy filter) and `viewport` for scrollable overlays
 - [lipgloss](https://github.com/charmbracelet/lipgloss) — layout & styling
 - [x/ansi](https://github.com/charmbracelet/x) — ANSI-aware compositing for the floating modals
+- [go-toml/v2](https://github.com/pelletier/go-toml) — parsing the Omarchy system theme
 
-The UI uses **ANSI 16-color codes only** (no hex), so it automatically inherits
-and follows your terminal's color scheme when you switch themes.
+The UI ships a **theme engine**: a default "Stitch" TrueColor palette (neon-green
+cyberpunk) that automatically adopts your **Omarchy** system theme when present.
+Hex colors degrade gracefully to the nearest ANSI color on terminals without
+24-bit support.
 
 ## Features
 
@@ -42,8 +45,10 @@ Working today (mock data):
 - **Subnet routes** — the details pane shows a peer's advertised routes (first 5, with a "+N more" hint); press `e` for a scrollable overlay of the full list
 - **Floating overlays** — true modals for help (`?`) and routes (`e`) that composite over the still-visible background; while open, `j/k` scroll only the overlay and `esc`/`q` close it
 - Exit nodes and subnet routers sorted to the top of the list
-- Node-type glyphs (exit / subnet / OS), online/offline indicators, and latency sparklines
+- Node-type glyphs (exit / subnet / OS), online/offline indicators, and a color-graded latency graph (faint → accent → warning → error by latency)
+- Configurable theme via `~/.config/tailscale-tui/theme.json` (falls back to the default Stitch theme)
 - Terminal log pane and status/help bars
+- Minimalist styling — rounded borders, a bright border on the focused pane (subtle on the rest), and a gutter-bar list selection
 
 Not yet implemented:
 
@@ -75,6 +80,26 @@ go run .
 
 Press `q` or `ctrl+c` to quit.
 
+### Theming
+
+The default **Stitch** theme is a neon-green cyberpunk palette. The app also
+reads the native **Omarchy** (Aether) system theme automatically from
+`~/.config/omarchy/current/theme/colors.toml` (override the path with the
+`TAILSCALE_TUI_THEME` env var). That file is a flat TOML palette:
+
+```toml
+accent     = "#509475"
+foreground = "#C1C497"
+background = "#111c18"
+color0  = "#23372B"   # ... through ...
+color15 = "#9eebb3"
+```
+
+Mapped onto the theme as: `accent`→primary accent, `color2`→secondary,
+`background`→background, `foreground`→text, `color8`→inactive borders/dim text,
+`color3`→warning, `color1`→error. Any missing key, or a missing/malformed file,
+falls back to the corresponding Stitch default — it never crashes.
+
 ### Build
 
 ```bash
@@ -88,7 +113,7 @@ go build -o tailscaleTUI .
 main.go                entry point
 internal/types         domain models (Peer, LocalStatus, enums)
 internal/mock          hardcoded sample data (temporary)
-internal/styles        lipgloss styling + ANSI palette
+internal/styles        theme engine (theme.go) + lipgloss styling (styles.go)
 internal/tui           Bubble Tea Model/Update/View + peer list
 design-spec.md         authoritative UI/UX specification
 ```
@@ -99,5 +124,6 @@ design-spec.md         authoritative UI/UX specification
 - [x] Phase 2 — interactive peer list, filtering, dynamic details
 - [x] Phase 2 refinement — exit node toggle & indicators
 - [x] Phase 2 completion — strict exit logic, subnet routes, help & routes overlays
+- [x] Phase 4 — theme engine (TrueColor + config), color-graded latency graph
 - [ ] Remaining node actions (SSH, ping, connect toggle, accounts)
 - [ ] Real `tailscale status --json` data adapter

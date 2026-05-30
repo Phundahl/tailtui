@@ -79,39 +79,43 @@ func (peerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	}
 	selected := index == m.Index()
 	width := m.Width()
-	dot := onlineSymbol(p.Online)
 
-	// Right-aligned segment: an "active exit node" chip (when set) plus the
-	// online/offline dot. Kept outside the selection block so both the
-	// selection and exit-node states stay visible at once.
-	right := dot
+	// Right-aligned segment: the active-exit marker (soft yellow label, no
+	// filled chip) plus the online/offline dot.
+	right := onlineSymbol(p.Online)
 	if p.IsActiveExitNode {
-		right = styles.ExitChip.Render(" 󰖟 EXIT ") + " " + dot
+		right = styles.ExitName.Render("󰖟 exit") + "  " + onlineSymbol(p.Online)
 	}
 
-	cursor := "  "
+	// A colored left gutter marks the selection instead of a full-width block.
+	gutter := "  "
 	if selected {
-		cursor = "> "
-	}
-
-	if selected {
-		// No nested colors inside the high-contrast selection block.
-		left := cursor + joinFields(p.Icon(), p.Badge(), p.Hostname)
-		blockW := width - lipgloss.Width(right) - 1 // -1 for the separating space
-		block := styles.Selected.Render(padRight(left, blockW))
-		fmt.Fprint(w, block+" "+right)
-		return
+		gutter = styles.SelectBar.Render("│") + " "
 	}
 
 	badge := ""
 	if b := p.Badge(); b != "" {
 		badge = styles.Badge.Render(b)
 	}
-	name := p.Hostname
-	if p.IsActiveExitNode {
-		name = styles.ExitName.Render(p.Hostname)
+
+	// Theme the node glyph by reachability instead of leaving it the terminal
+	// default foreground (otherwise icons ignore the active theme).
+	icon := styles.IconOnline.Render(p.Icon())
+	if !p.Online {
+		icon = styles.IconOffline.Render(p.Icon())
 	}
-	left := cursor + joinFields(p.Icon(), badge, name)
+
+	name := p.Hostname
+	switch {
+	case selected:
+		name = styles.Selected.Render(name) // bold accent
+	case p.IsActiveExitNode:
+		name = styles.ExitName.Render(name)
+	default:
+		name = styles.Value.Render(name)
+	}
+
+	left := gutter + joinFields(icon, badge, name)
 	fmt.Fprint(w, joinRow(left, right, width))
 }
 
