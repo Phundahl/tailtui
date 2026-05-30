@@ -37,8 +37,9 @@ func computeLayout(w, h int) layout {
 	rightW := w - leftW
 
 	// The list lives inside the left box, below the local dashboard and a
-	// divider: subtract the border (2), the dashboard, and one divider line.
-	listW := leftW - 2
+	// divider: its width is the box's inner content width (border + padding
+	// removed); its height subtracts the border, dashboard, and divider line.
+	listW := styles.ContentWidth(leftW)
 	listH := midH - 2 - dashboardHeight - 1
 	if listH < 1 {
 		listH = 1
@@ -94,14 +95,15 @@ func (m Model) renderFooter() string {
 
 // --- left pane: local dashboard + peer list ----------------------------------
 
+// renderLeftPane is the focused pane (peer list), so it gets a bright border.
 func (m Model) renderLeftPane(lay layout) string {
-	cw := lay.leftW - 2 // content width inside the border
+	cw := styles.ContentWidth(lay.leftW) // inner width (border + padding removed)
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		m.renderLocalDashboard(cw),
 		styles.Divider(cw),
 		m.peers.View(),
 	)
-	return styles.Box(lay.leftW, lay.midH).Render(content)
+	return styles.BoxFocused(lay.leftW, lay.midH).Render(content)
 }
 
 func (m Model) renderLocalDashboard(w int) string {
@@ -155,7 +157,7 @@ func (m Model) renderDetailsPane(lay layout) string {
 		"",
 		styles.Heading.Render("LATENCY HISTORY (60s)"),
 		latencyStats(p.LatencyHistory),
-		styles.Sparkline(p.LatencyHistory),
+		styles.LatencyGraph(p.LatencyHistory),
 	}
 	if section := routesSummary(p); section != "" {
 		identity = append(identity, "", section)

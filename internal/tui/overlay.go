@@ -13,7 +13,11 @@ import (
 	"github.com/Phundahl/tailscaleTUI/internal/types"
 )
 
-// Modal sizing: padding/border consume fixed cells around the viewport content.
+// Modal sizing constants. The modal uses the terminal's default background and
+// a bright rounded border — it is NOT painted with a solid fill. Opacity over
+// the base view is still guaranteed because the bordered box rectangularizes
+// every line (padding shorter lines with spaces), and the compositor overwrites
+// those background cells.
 const (
 	modalHPad   = 2 // horizontal padding cells per side
 	modalVPad   = 1 // vertical padding cells per side
@@ -54,10 +58,12 @@ func overlayHeight(termH, contentLines int) int {
 // countLines reports how many lines a rendered content block occupies.
 func countLines(s string) int { return strings.Count(s, "\n") + 1 }
 
-// newOverlayVP builds a viewport with an opaque (modal-background) content area.
+// newOverlayVP builds a viewport for the modal content, with an opaque
+// (theme-background) content area so short/blank lines don't reveal the view
+// behind the modal.
 func newOverlayVP(w, h int, content string) viewport.Model {
 	vp := viewport.New(w, h)
-	vp.Style = lipgloss.NewStyle().Background(styles.ModalBg)
+	vp.Style = lipgloss.NewStyle().Background(styles.Bg)
 	vp.SetContent(content)
 	return vp
 }
@@ -118,28 +124,29 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// renderOverlay draws the active modal as a true floating box composited on top
-// of the (still visible) base view. The modal is 100% opaque: every line is the
-// full content width with the modal background, and the container has explicit
-// Width/Height plus a solid Background so the whole bounding box is painted.
+// renderOverlay draws the active modal as a true floating box composited over
+// the (still visible) base view. The modal is 100% opaque: every line is the
+// full content width painted with the theme background (modalLine / modal
+// styles), and the container sets explicit Width/Height + a solid Background so
+// the whole bounding box — padding and border included — overwrites whatever is
+// behind it. A bright rounded border + colored title make it float.
 func (m Model) renderOverlay(base string) string {
 	w := m.overlay.Width
 
 	var title, hint string
 	switch m.state {
 	case stateHelp:
-		title = "HELP — KEYBINDINGS"
-		hint = "[j/k] scroll   [?/Esc] close"
+		title = "Help · Keybindings"
+		hint = "[j/k] scroll   [?/esc] close"
 	case stateRoutes:
 		name := ""
 		if p, ok := m.selectedPeer(); ok {
 			name = p.Hostname
 		}
-		title = "ADVERTISED ROUTES — " + name
-		hint = "[j/k] scroll   [Esc/q] close"
+		title = "Advertised Routes · " + name
+		hint = "[j/k] scroll   [esc/q] close"
 	}
 
-	// Each line is padded to the full width w with the modal background.
 	inner := lipgloss.JoinVertical(lipgloss.Left,
 		modalLine(w, styles.ModalTitle.Render(ansi.Truncate(title, w, "…"))),
 		modalDivider(w),
@@ -150,16 +157,16 @@ func (m Model) renderOverlay(base string) string {
 
 	innerH := modalChrome + m.overlay.Height
 	// lipgloss Width/Height include padding, so add it back: the content area
-	// must stay exactly w x innerH or the full-width lines wrap.
+	// stays exactly w x innerH and the full-width lines never wrap.
 	modal := lipgloss.NewStyle().
 		Width(w + 2*modalHPad).
 		Height(innerH + 2*modalVPad).
-		Background(styles.ModalBg).
+		Background(styles.Bg).
 		Foreground(styles.Fg).
 		Padding(modalVPad, modalHPad).
-		Border(lipgloss.ThickBorder()).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Primary).
-		BorderBackground(styles.ModalBg).
+		BorderBackground(styles.Bg).
 		Render(inner)
 
 	return overlayCenter(base, modal)
@@ -170,7 +177,7 @@ func modalLine(w int, content string) string {
 	return styles.ModalFill(w).Render(content)
 }
 
-// modalDivider renders a full-width horizontal rule on the modal background.
+// modalDivider renders a full-width rule on the modal background.
 func modalDivider(w int) string {
 	return styles.ModalAccent.Render(strings.Repeat("─", w))
 }
@@ -178,8 +185,9 @@ func modalDivider(w int) string {
 // overlayCenter composites the fg block centered over the bg block, line by
 // line. It is ANSI-aware: each background row is split around the modal's
 // columns with ansi.Truncate / ansi.TruncateLeft (which carry SGR state across
-// the cut), and the modal's cells overwrite the background entirely so no text
-// shows through. Explicit resets isolate the three segments' styles.
+// the cut), and the modal's cells (including its padding spaces) overwrite the
+// background entirely so no text shows through. Explicit resets isolate the
+// three segments' styles.
 func overlayCenter(bg, fg string) string {
 	bgLines := strings.Split(bg, "\n")
 	fgLines := strings.Split(fg, "\n")
@@ -217,9 +225,8 @@ func overlayCenter(bg, fg string) string {
 
 // --- overlay content ---------------------------------------------------------
 //
-// Both builders return content whose every line is exactly w wide and fully
-// painted with the modal background (via modalLine), so the viewport never
-// exposes a transparent cell.
+// Both builders pad every line to width w with the theme background (modalLine
+// + Modal* styles), so the viewport never exposes a transparent cell.
 
 // helpBody renders the keybinding reference shown in the help overlay.
 func helpBody(w int) string {
@@ -239,7 +246,7 @@ func helpBody(w int) string {
 		modalLine(w, ""),
 		modalLine(w, styles.ModalHeading.Render("GLOBAL")),
 		row("?", "Toggle this help"),
-		row("q / Esc", "Close overlay / quit"),
+		row("q / esc", "Close overlay / quit"),
 	}
 	return strings.Join(lines, "\n")
 }
@@ -251,7 +258,7 @@ func routesBody(p types.Peer, w int) string {
 		modalLine(w, ""),
 	}
 	for _, r := range p.AdvertisedRoutes {
-		lines = append(lines, modalLine(w, styles.ModalAccent.Render("  → ")+styles.ModalText.Render(r)))
+		lines = append(lines, modalLine(w, styles.ModalAccent.Render("  →")+styles.ModalText.Render(" "+r)))
 	}
 	return strings.Join(lines, "\n")
 }
