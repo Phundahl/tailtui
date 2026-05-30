@@ -155,6 +155,12 @@ type LocalStatus struct {
 	LatencyHistory []int
 }
 
+// Account is a Tailscale login the user can switch between (accounts modal).
+type Account struct {
+	Email  string
+	Active bool // the currently signed-in session
+}
+
 // LogEntry is a single line in the terminal log pane.
 type LogEntry struct {
 	Time    string

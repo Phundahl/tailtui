@@ -24,16 +24,15 @@ func newPeerList(peers []types.Peer) list.Model {
 	}
 
 	l := list.New(items, peerDelegate{}, 0, 0)
-	l.Title = "NODES"
 
-	// Strip the default chrome we render ourselves; keep fuzzy filtering ("/").
+	// Strip the default chrome we render ourselves: the NODES pane supplies the
+	// title in its top border; the filter input still appears while filtering.
+	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
 	l.SetShowPagination(false)
 	l.SetFilteringEnabled(true)
 
-	// Theme: ANSI colors only, consistent with internal/styles.
-	l.Styles.Title = styles.Heading
 	l.Styles.FilterPrompt = lipgloss.NewStyle().Foreground(styles.Primary)
 	l.Styles.FilterCursor = lipgloss.NewStyle().Foreground(styles.Primary)
 	l.Styles.NoItems = lipgloss.NewStyle().Foreground(styles.Subtle)
@@ -68,8 +67,8 @@ func nodeRank(p types.Peer) int {
 // It implements list.ItemDelegate.
 type peerDelegate struct{}
 
-func (peerDelegate) Height() int                       { return 1 }
-func (peerDelegate) Spacing() int                      { return 0 }
+func (peerDelegate) Height() int                         { return 1 }
+func (peerDelegate) Spacing() int                        { return 0 }
 func (peerDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 
 func (peerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
@@ -80,42 +79,46 @@ func (peerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	selected := index == m.Index()
 	width := m.Width()
 
-	// Right-aligned segment: the active-exit marker (soft yellow label, no
-	// filled chip) plus the online/offline dot.
-	right := onlineSymbol(p.Online)
-	if p.IsActiveExitNode {
-		right = styles.ExitName.Render("󰖟 exit") + "  " + onlineSymbol(p.Online)
+	glyph := "○"
+	if p.Online {
+		glyph = "●"
 	}
 
-	// A colored left gutter marks the selection instead of a full-width block.
-	gutter := "  "
+	// Selected row: a full-width surface-bright bar with a leading ❯ pointer.
+	// Built from plain text so the single Selected style paints the whole row
+	// uniformly (no fg-only gaps in the highlight).
 	if selected {
-		gutter = styles.SelectBar.Render("│") + " "
+		exit := ""
+		if p.IsActiveExitNode {
+			exit = "󰖟 exit  "
+		}
+		left := "❯ " + joinFields(p.Icon(), p.Badge(), p.Hostname)
+		row := joinRow(left, exit+glyph, width)
+		fmt.Fprint(w, styles.Selected.Render(row))
+		return
 	}
 
-	badge := ""
-	if b := p.Badge(); b != "" {
-		badge = styles.Badge.Render(b)
-	}
-
-	// Theme the node glyph by reachability instead of leaving it the terminal
-	// default foreground (otherwise icons ignore the active theme).
+	// Unselected row: themed per element.
 	icon := styles.IconOnline.Render(p.Icon())
 	if !p.Online {
 		icon = styles.IconOffline.Render(p.Icon())
 	}
-
-	name := p.Hostname
-	switch {
-	case selected:
-		name = styles.Selected.Render(name) // bold accent
-	case p.IsActiveExitNode:
-		name = styles.ExitName.Render(name)
-	default:
-		name = styles.Value.Render(name)
+	badge := ""
+	if b := p.Badge(); b != "" {
+		badge = styles.Badge.Render(b)
 	}
-
-	left := gutter + joinFields(icon, badge, name)
+	name := styles.Value.Render(p.Hostname)
+	if p.IsActiveExitNode {
+		name = styles.ExitName.Render(p.Hostname)
+	}
+	right := styles.Offline.Render(glyph)
+	if p.Online {
+		right = styles.Online.Render(glyph)
+	}
+	if p.IsActiveExitNode {
+		right = styles.ExitName.Render("󰖟 exit") + "  " + right
+	}
+	left := "  " + joinFields(icon, badge, name)
 	fmt.Fprint(w, joinRow(left, right, width))
 }
 

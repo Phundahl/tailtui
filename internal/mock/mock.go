@@ -9,12 +9,12 @@ import "github.com/Phundahl/tailscaleTUI/internal/types"
 // Local returns the mocked local node ("Phundahl").
 func Local() types.LocalStatus {
 	return types.LocalStatus{
-		User:           "phundahl@tailnet.com",
-		Hostname:       "workstation-7",
-		LocalIP:        "192.168.1.15",
-		TailscaleIP:    "100.64.0.1",
-		Conn:           types.ConnRelay,
-		Relay:          "fra",
+		User:        "phundahl@tailnet.com",
+		Hostname:    "workstation-7",
+		LocalIP:     "192.168.1.15",
+		TailscaleIP: "100.64.0.1",
+		Conn:        types.ConnRelay,
+		Relay:       "fra",
 		// ExitNode is derived from whichever peer has IsActiveExitNode set
 		// (see Model.activeExitNodeName), so it is intentionally left empty here.
 		ExitNode:       "",
@@ -28,16 +28,16 @@ func Local() types.LocalStatus {
 func Peers() []types.Peer {
 	return []types.Peer{
 		{
-			ID:             "n-exit",
-			Hostname:       "amsterdam-exit",
-			DNSName:        "amsterdam-exit.tailnet.ts.net",
-			OS:             types.OSLinux,
-			TailscaleIP:    "100.64.0.10",
-			Conn:           types.ConnDirect,
-			Version:        "1.54.0",
-			Tags:           []string{"tag:exit"},
-			LastSeen:       "Just now",
-			Online:         true,
+			ID:               "n-exit",
+			Hostname:         "amsterdam-exit",
+			DNSName:          "amsterdam-exit.tailnet.ts.net",
+			OS:               types.OSLinux,
+			TailscaleIP:      "100.64.0.10",
+			Conn:             types.ConnDirect,
+			Version:          "1.54.0",
+			Tags:             []string{"tag:exit"},
+			LastSeen:         "Just now",
+			Online:           true,
 			NodeType:         types.NodeExitNode,
 			LatencyMs:        31,
 			LatencyHistory:   []int{29, 31, 33, 30, 28, 31, 35, 31},
@@ -112,5 +112,13 @@ func Logs() []types.LogEntry {
 	return []types.LogEntry{
 		{Time: "14:55:02", Level: "INFO", Message: "connection established to peer-dev-box via relay (ams)"},
 		{Time: "14:55:02", Level: "DEBUG", Message: "mtu discovery: 1280 bytes"},
+	}
+}
+
+// Accounts returns the mocked Tailscale logins for the accounts modal.
+func Accounts() []types.Account {
+	return []types.Account{
+		{Email: "user@tailnet.com", Active: true},
+		{Email: "work@corp.com", Active: false},
 	}
 }

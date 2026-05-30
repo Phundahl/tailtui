@@ -29,10 +29,10 @@ A lightweight, keyboard-driven **terminal UI for Tailscale**, with a high-densit
 - [x/ansi](https://github.com/charmbracelet/x) — ANSI-aware compositing for the floating modals
 - [go-toml/v2](https://github.com/pelletier/go-toml) — parsing the Omarchy system theme
 
-The UI ships a **theme engine**: a default "Stitch" TrueColor palette (neon-green
-cyberpunk) that automatically adopts your **Omarchy** system theme when present.
-Hex colors degrade gracefully to the nearest ANSI color on terminals without
-24-bit support.
+The UI ships a **theme engine**: a default **"Matrix Core"** TrueColor palette
+(sharp/brutalist, neon-green on near-black) that automatically adopts your
+**Omarchy** system theme when present. Hex colors degrade gracefully to the
+nearest ANSI color on terminals without 24-bit support.
 
 ## Features
 
@@ -46,9 +46,9 @@ Working today (mock data):
 - **Floating overlays** — true modals for help (`?`) and routes (`e`) that composite over the still-visible background; while open, `j/k` scroll only the overlay and `esc`/`q` close it
 - Exit nodes and subnet routers sorted to the top of the list
 - Node-type glyphs (exit / subnet / OS), online/offline indicators, and a color-graded latency graph (faint → accent → warning → error by latency)
-- Configurable theme via `~/.config/tailscale-tui/theme.json` (falls back to the default Stitch theme)
+- Native theme integration — adopts the system **Omarchy** palette (falls back to the built-in Matrix Core theme)
 - Terminal log pane and status/help bars
-- Minimalist styling — rounded borders, a bright border on the focused pane (subtle on the rest), and a gutter-bar list selection
+- Sharp/brutalist styling — single-line panes with titles in the top border, a bright border on the focused pane, and a `❯` surface-bright list selection
 
 Not yet implemented:
 
@@ -82,7 +82,7 @@ Press `q` or `ctrl+c` to quit.
 
 ### Theming
 
-The default **Stitch** theme is a neon-green cyberpunk palette. The app also
+The default **Matrix Core** theme is a sharp, neon-green-on-near-black palette. The app also
 reads the native **Omarchy** (Aether) system theme automatically from
 `~/.config/omarchy/current/theme/colors.toml` (override the path with the
 `TAILSCALE_TUI_THEME` env var). That file is a flat TOML palette:
@@ -98,7 +98,7 @@ color15 = "#9eebb3"
 Mapped onto the theme as: `accent`→primary accent, `color2`→secondary,
 `background`→background, `foreground`→text, `color8`→inactive borders/dim text,
 `color3`→warning, `color1`→error. Any missing key, or a missing/malformed file,
-falls back to the corresponding Stitch default — it never crashes.
+falls back to the corresponding Matrix Core default — it never crashes.
 
 ### Build
 
@@ -124,6 +124,7 @@ design-spec.md         authoritative UI/UX specification
 - [x] Phase 2 — interactive peer list, filtering, dynamic details
 - [x] Phase 2 refinement — exit node toggle & indicators
 - [x] Phase 2 completion — strict exit logic, subnet routes, help & routes overlays
-- [x] Phase 4 — theme engine (TrueColor + config), color-graded latency graph
+- [x] Phase 4 — theme engine (TrueColor + Omarchy), color-graded latency graph
+- [x] Phase 5 — Matrix Core master design (sharp panes, surface tonal depth, tabular modals)
 - [ ] Remaining node actions (SSH, ping, connect toggle, accounts)
 - [ ] Real `tailscale status --json` data adapter

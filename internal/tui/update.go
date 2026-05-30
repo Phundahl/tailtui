@@ -48,6 +48,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.openRoutes(p), nil
 				}
 				return m, nil
+			case "l":
+				return m.openAccounts(), nil
 			case "x":
 				return m.toggleExitNode()
 			case "up", "k":

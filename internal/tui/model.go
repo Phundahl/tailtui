@@ -22,6 +22,7 @@ const (
 	stateMain appState = iota
 	stateHelp
 	stateRoutes
+	stateAccounts
 )
 
 // Model is the root Bubble Tea model holding all UI state.
@@ -40,16 +41,21 @@ type Model struct {
 	local types.LocalStatus
 	peers list.Model // the peer list; its highlighted item drives the details pane
 	logs  []types.LogEntry
+
+	// Accounts modal state.
+	accounts      []types.Account
+	accountCursor int
 }
 
 // New constructs the initial model populated with mock data.
 func New() Model {
 	return Model{
-		state:   stateMain,
-		overlay: viewport.New(0, 0), // sized when an overlay is opened
-		local:   mock.Local(),
-		peers:   newPeerList(mock.Peers()),
-		logs:    mock.Logs(),
+		state:    stateMain,
+		overlay:  viewport.New(0, 0), // sized when an overlay is opened
+		local:    mock.Local(),
+		peers:    newPeerList(mock.Peers()),
+		logs:     mock.Logs(),
+		accounts: mock.Accounts(),
 	}
 }
 

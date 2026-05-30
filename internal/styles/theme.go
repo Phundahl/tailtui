@@ -14,7 +14,9 @@ import (
 type Theme struct {
 	PrimaryAccent   lipgloss.Color // active elements, focus, accents
 	SecondaryAccent lipgloss.Color // online state, routes, secondary highlights
-	Background      lipgloss.Color // intended canvas color (see note in styles.go)
+	Background      lipgloss.Color // base canvas color
+	Surface         lipgloss.Color // elevated panels / modals (tonal depth)
+	SurfaceBright   lipgloss.Color // selected row / highlight bar
 	BorderInactive  lipgloss.Color // unfocused pane borders, dividers
 	TextNormal      lipgloss.Color // primary text
 	TextDim         lipgloss.Color // secondary / faded text
@@ -22,18 +24,21 @@ type Theme struct {
 	Error           lipgloss.Color // conflicts, critical latency
 }
 
-// DefaultTheme is the "Stitch" aesthetic: a neon-on-near-black cyberpunk look.
-// It is the fallback whenever the system theme cannot be loaded.
+// DefaultTheme is the "Matrix Core" master design: the EXACT hex codes from the
+// style guide's YAML frontmatter (_designs/00_STYLE_GUIDE.md). It is the
+// fallback whenever the system theme cannot be loaded.
 func DefaultTheme() Theme {
 	return Theme{
-		PrimaryAccent:   "#39FF14", // neon green
-		SecondaryAccent: "#00E5A0", // mint / teal-green
-		Background:      "#0E150F", // deep green-black
-		BorderInactive:  "#2A332B", // dim gray-green
-		TextNormal:      "#D6F5D6", // soft off-white green
-		TextDim:         "#5C6B5C", // faded sage
-		Warning:         "#FF9E2C", // amber / orange
-		Error:           "#FF3B30", // red
+		PrimaryAccent:   "#6bfb9a", // primary
+		SecondaryAccent: "#4ade80", // primary-container — online/icons green
+		Background:      "#0e150f", // background / surface
+		Surface:         "#1a211b", // surface-container — elevated panels/modals
+		SurfaceBright:   "#333b34", // surface-bright — selection highlight
+		BorderInactive:  "#3d4a3e", // outline-variant — dim borders
+		TextNormal:      "#dde5da", // on-surface
+		TextDim:         "#869486", // outline — labels / dim text
+		Warning:         "#ffdd75", // tertiary
+		Error:           "#ffb4ab", // error
 	}
 }
 
@@ -77,9 +82,9 @@ func ThemePath() string {
 }
 
 // LoadTheme returns the system (Omarchy) theme if it can be found and parsed,
-// otherwise it silently falls back to the default Stitch theme. Mapping is
-// per-field: any key missing from the TOML keeps its Stitch default, so a
-// partial or unusual palette never crashes and never leaves blanks.
+// otherwise it silently falls back to the default Matrix Core theme. Mapping is
+// per-field: any key missing from the TOML keeps its default, so a partial or
+// unusual palette never crashes and never leaves blanks.
 //
 // Omarchy → Theme mapping:
 //
@@ -114,6 +119,8 @@ func LoadTheme() Theme {
 	set(&t.PrimaryAccent, o.Accent)
 	set(&t.SecondaryAccent, o.Color2)
 	set(&t.Background, o.Background)
+	set(&t.Surface, o.Color0)       // darkest palette slot → elevated surface
+	set(&t.SurfaceBright, o.Color8) // bright black → selection highlight
 	set(&t.TextNormal, o.Foreground)
 	set(&t.BorderInactive, o.Color8)
 	set(&t.TextDim, o.Color8)

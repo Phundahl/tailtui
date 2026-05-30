@@ -5,10 +5,9 @@
 // startup with the loaded theme. An init() applies DefaultTheme so the package
 // is always usable even before main wires up the loader.
 //
-// Note on Background: the theme defines a canvas color, but the app renders on
-// the terminal's native background. Painting a full-screen background reliably
-// across nested lipgloss blocks is fragile and would complicate the modal
-// compositor; the Stitch aesthetic is carried by foreground colors instead.
+// Aesthetic: "Matrix Core" — sharp/brutalist. All containers use single-line
+// box drawing (┌─┐│└┘) via Pane/Modal; tonal depth comes from Surface layers
+// (panels) and SurfaceBright (selection), not rounded corners or shadows.
 package styles
 
 import (
@@ -25,7 +24,9 @@ var (
 	Warn           lipgloss.Color // exit node / degraded
 	Danger         lipgloss.Color // conflict / error
 	Fg             lipgloss.Color // primary text
-	Bg             lipgloss.Color // theme canvas color (see package note)
+	Bg             lipgloss.Color // base canvas color
+	Surface        lipgloss.Color // elevated panels / modals
+	SurfaceBright  lipgloss.Color // selection highlight
 	BorderInactive lipgloss.Color // unfocused borders / dividers
 )
 
@@ -38,16 +39,25 @@ var (
 	// instead of inheriting the terminal's default foreground.
 	IconOnline, IconOffline lipgloss.Style
 
-	// Modal surface styles bake in the theme Background so an overlay renders as
-	// a fully opaque rectangle — every span paints the background, leaving no
-	// fg-only gaps for the view behind it to bleed through. See overlay.go.
+	Caution lipgloss.Style // relayed/degraded (yellow)
+	Button  lipgloss.Style // [ Connect ]-style bracketed buttons
+
+	// Modal surface styles bake in the Surface color so an overlay renders as a
+	// fully opaque, tonally-raised rectangle — every span paints the surface,
+	// leaving no fg-only gaps for the view behind it to bleed through.
 	ModalTitle, ModalHeading, ModalText, ModalKey, ModalAccent, ModalDim lipgloss.Style
+
+	// Routing-table status chips.
+	StatusOK, StatusWarn, StatusErr lipgloss.Style
+
+	// Active-account highlight bar (accounts modal).
+	AccountActive, AccountActiveSub lipgloss.Style
 )
 
 func init() { Apply(DefaultTheme()) }
 
 // Apply rebuilds every package-level color and style from the given theme.
-// Funcs like Box/Divider/LatencyGraph read these vars at call time, so they
+// Funcs like Pane/Divider/LatencyGraph read these vars at call time, so they
 // pick up the new theme automatically after Apply.
 func Apply(t Theme) {
 	Primary = t.PrimaryAccent
@@ -57,6 +67,8 @@ func Apply(t Theme) {
 	Danger = t.Error
 	Fg = t.TextNormal
 	Bg = t.Background
+	Surface = t.Surface
+	SurfaceBright = t.SurfaceBright
 	BorderInactive = t.BorderInactive
 
 	Title = lipgloss.NewStyle().Foreground(Primary).Bold(true)
@@ -64,63 +76,50 @@ func Apply(t Theme) {
 	Label = lipgloss.NewStyle().Foreground(Subtle)
 	Value = lipgloss.NewStyle().Foreground(Fg)
 	Dim = lipgloss.NewStyle().Foreground(Subtle)
-	Selected = lipgloss.NewStyle().Foreground(Primary).Bold(true)
-	SelectBar = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	// Selection: surface-bright highlight bar + accent text (pointer added in delegate).
+	Selected = lipgloss.NewStyle().Foreground(Primary).Background(SurfaceBright).Bold(true)
+	SelectBar = lipgloss.NewStyle().Foreground(Primary).Background(SurfaceBright).Bold(true)
 	Online = lipgloss.NewStyle().Foreground(Secondary)
 	Offline = lipgloss.NewStyle().Foreground(Subtle)
-	Badge = lipgloss.NewStyle().Foreground(Warn)
+	Badge = lipgloss.NewStyle().Foreground(Secondary)
 	ExitName = lipgloss.NewStyle().Foreground(Warn).Bold(true)
 
 	IconOnline = lipgloss.NewStyle().Foreground(Secondary)
 	IconOffline = lipgloss.NewStyle().Foreground(Subtle)
+	Caution = lipgloss.NewStyle().Foreground(Warn) // relayed / degraded (yellow)
+	Button = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 
-	// Opaque modal surface: foreground colors over the theme Background.
-	ModalTitle = lipgloss.NewStyle().Foreground(Primary).Background(Bg).Bold(true)
-	ModalHeading = lipgloss.NewStyle().Foreground(Secondary).Background(Bg).Bold(true)
-	ModalText = lipgloss.NewStyle().Foreground(Fg).Background(Bg)
-	ModalKey = lipgloss.NewStyle().Foreground(Primary).Background(Bg)
-	ModalAccent = lipgloss.NewStyle().Foreground(Secondary).Background(Bg)
-	ModalDim = lipgloss.NewStyle().Foreground(Subtle).Background(Bg)
+	// Opaque modal surface: foreground colors over the elevated Surface color.
+	ModalTitle = lipgloss.NewStyle().Foreground(Primary).Background(Surface).Bold(true)
+	ModalHeading = lipgloss.NewStyle().Foreground(Secondary).Background(Surface).Bold(true)
+	ModalText = lipgloss.NewStyle().Foreground(Fg).Background(Surface)
+	ModalKey = lipgloss.NewStyle().Foreground(Primary).Background(Surface)
+	ModalAccent = lipgloss.NewStyle().Foreground(Secondary).Background(Surface)
+	ModalDim = lipgloss.NewStyle().Foreground(Subtle).Background(Surface)
+
+	// Routing-table status chips (on the modal surface).
+	StatusOK = lipgloss.NewStyle().Foreground(Secondary).Background(Surface).Bold(true)
+	StatusWarn = lipgloss.NewStyle().Foreground(Warn).Background(Surface).Bold(true)
+	StatusErr = lipgloss.NewStyle().Foreground(Danger).Background(Surface).Bold(true)
+
+	// Active account row: dark text on a solid primary-green bar.
+	AccountActive = lipgloss.NewStyle().Foreground(Bg).Background(Primary).Bold(true)
+	AccountActiveSub = lipgloss.NewStyle().Foreground(Bg).Background(Primary)
 }
 
 // ModalFill returns a style that paints content to the given width with the
-// theme background, padding the remainder so the line is fully opaque.
+// Surface color, padding the remainder so the line is fully opaque.
 func ModalFill(width int) lipgloss.Style {
 	if width < 0 {
 		width = 0
 	}
-	return lipgloss.NewStyle().Width(width).Background(Bg)
+	return lipgloss.NewStyle().Width(width).Background(Surface)
 }
 
 const boxHPad = 1 // horizontal breathing room inside panes/modals
 
-// box is the shared rounded-border container; Box/BoxFocused pick the border
-// color. Sized to the given OUTER width/height (border included). Content area
-// is width-2(border)-2(padding) wide.
-func box(width, height int, border lipgloss.TerminalColor) lipgloss.Style {
-	w, h := width-2, height-2
-	if w < 0 {
-		w = 0
-	}
-	if h < 0 {
-		h = 0
-	}
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(border).
-		Padding(0, boxHPad).
-		Width(w).
-		Height(h)
-}
-
-// Box returns an inactive pane container with a subtle, dim border.
-func Box(width, height int) lipgloss.Style { return box(width, height, BorderInactive) }
-
-// BoxFocused returns the active/focused pane container with a bright border.
-func BoxFocused(width, height int) lipgloss.Style { return box(width, height, Primary) }
-
-// ContentWidth returns the usable inner width of a Box of the given outer width
-// (subtracting both border and padding).
+// ContentWidth returns the usable inner width of a Pane of the given outer width
+// (subtracting both the single-line border and the horizontal padding).
 func ContentWidth(outer int) int {
 	w := outer - 2 - 2*boxHPad
 	if w < 0 {
@@ -189,6 +188,19 @@ func LatencyGraph(values []int) string {
 		b.WriteString(st.Render(string(runes[i])))
 	}
 	return b.String()
+}
+
+// LatencyGraphWidth renders LatencyGraph resampled to exactly width bars, so the
+// graph fills the available pane width.
+func LatencyGraphWidth(values []int, width int) string {
+	if width <= 0 || len(values) == 0 {
+		return LatencyGraph(values)
+	}
+	rs := make([]int, width)
+	for i := range rs {
+		rs[i] = values[i*len(values)/width]
+	}
+	return LatencyGraph(rs)
 }
 
 // bars converts values to block runes scaled to the series min/max.
