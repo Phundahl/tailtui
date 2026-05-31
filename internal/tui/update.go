@@ -3,7 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/Phundahl/tailscaleTUI/internal/types"
+	"github.com/Phundahl/tailtui/internal/types"
 )
 
 // Update implements tea.Model.

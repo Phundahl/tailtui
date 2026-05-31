@@ -4,7 +4,7 @@
 // later phase; keep the shapes identical to the domain models in types.
 package mock
 
-import "github.com/Phundahl/tailscaleTUI/internal/types"
+import "github.com/Phundahl/tailtui/internal/types"
 
 // Local returns the mocked local node ("Phundahl").
 func Local() types.LocalStatus {

@@ -9,8 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/Phundahl/tailscaleTUI/internal/tailscale"
-	"github.com/Phundahl/tailscaleTUI/internal/types"
+	"github.com/Phundahl/tailtui/internal/tailscale"
+	"github.com/Phundahl/tailtui/internal/types"
 )
 
 const (

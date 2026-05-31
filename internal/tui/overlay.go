@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/Phundahl/tailscaleTUI/internal/styles"
-	"github.com/Phundahl/tailscaleTUI/internal/types"
+	"github.com/Phundahl/tailtui/internal/styles"
+	"github.com/Phundahl/tailtui/internal/types"
 )
 
 // Modal sizing constants. The modal is an opaque, tonally-raised box filled

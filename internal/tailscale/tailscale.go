@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Phundahl/tailscaleTUI/internal/types"
+	"github.com/Phundahl/tailtui/internal/types"
 )
 
 // Status runs `tailscale status --json` and returns the mapped local node and

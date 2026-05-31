@@ -68,10 +68,10 @@ type omarchyTheme struct {
 }
 
 // ThemePath returns the Omarchy master theme file. It honors the
-// TAILSCALE_TUI_THEME env override, otherwise defaults to the standard
+// TAILTUI_THEME env override, otherwise defaults to the standard
 // Omarchy "current theme" symlink target.
 func ThemePath() string {
-	if p := os.Getenv("TAILSCALE_TUI_THEME"); p != "" {
+	if p := os.Getenv("TAILTUI_THEME"); p != "" {
 		return p
 	}
 	home, err := os.UserHomeDir()

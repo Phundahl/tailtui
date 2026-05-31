@@ -1,4 +1,4 @@
-// Package types holds the core domain models for the Tailscale TUI.
+// Package types holds the core domain models for tailTUI.
 //
 // These structs are deliberately decoupled from the `tailscale` CLI / JSON
 // representation. In Phase 1 they are populated from hardcoded mock data; a

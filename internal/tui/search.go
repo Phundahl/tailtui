@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 
-	"github.com/Phundahl/tailscaleTUI/internal/types"
+	"github.com/Phundahl/tailtui/internal/types"
 )
 
 // Search/filter is managed by hand rather than via bubbles/list's built-in
