@@ -114,11 +114,3 @@ func Logs() []types.LogEntry {
 		{Time: "14:55:02", Level: "DEBUG", Message: "mtu discovery: 1280 bytes"},
 	}
 }
-
-// Accounts returns the mocked Tailscale logins for the accounts modal.
-func Accounts() []types.Account {
-	return []types.Account{
-		{Email: "user@tailnet.com", Active: true},
-		{Email: "work@corp.com", Active: false},
-	}
-}

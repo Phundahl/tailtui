@@ -77,6 +77,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.appendLog("INFO", action+" succeeded; refreshing"), fetchStatusCmd()
 
+	case accountsMsg:
+		// Live profile list arrived; refresh the model and re-render the modal if
+		// it's open. Keep the last good list on error.
+		if msg.err != nil {
+			return m.appendLog("ERROR", msg.err.Error()), nil
+		}
+		m.accounts = msg.accounts
+		if m.accountCursor >= len(m.accounts) {
+			m.accountCursor = 0
+		}
+		if m.state == stateAccounts {
+			m.overlay.SetContent(m.accountsBody(m.overlay.Width))
+		}
+		return m, nil
+
+	case accountActionMsg:
+		// An account command (switch / remove / logout / login) finished; log it
+		// and refresh both the profile list and the node status.
+		if msg.err != nil {
+			return m.appendLog("ERROR", msg.desc+": "+msg.err.Error()), fetchAccountsCmd()
+		}
+		return m.appendLog("INFO", msg.desc), tea.Batch(fetchAccountsCmd(), fetchStatusCmd())
+
 	case tea.KeyMsg:
 		// ctrl+c always quits, even mid-search or with an overlay open.
 		if msg.String() == "ctrl+c" {
@@ -114,7 +137,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "l":
-			return m.openAccounts(), nil
+			// Open the accounts modal and refresh the live profile list.
+			return m.openAccounts(), fetchAccountsCmd()
 		case "v":
 			return m.openLogs(), nil
 		case "O":

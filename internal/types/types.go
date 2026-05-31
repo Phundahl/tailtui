@@ -157,8 +157,9 @@ type LocalStatus struct {
 
 // Account is a Tailscale login the user can switch between (accounts modal).
 type Account struct {
-	Email  string
-	Active bool // the currently signed-in session
+	ID     string // profile ID from `tailscale switch --list` (used to switch/remove)
+	Email  string // account / display name
+	Active bool   // the currently signed-in session
 }
 
 // LogEntry is a single line in the terminal log pane.

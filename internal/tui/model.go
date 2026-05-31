@@ -75,20 +75,19 @@ type Model struct {
 // accounts panes remain mock-backed for now.
 func New() Model {
 	return Model{
-		state:    stateMain,
-		overlay:  viewport.New(0, 0), // sized when an overlay is opened
-		peers:    newPeerList(nil),
-		logs:     mock.Logs(),
-		accounts: mock.Accounts(),
-		latency:  make(map[string][]int),
+		state:   stateMain,
+		overlay: viewport.New(0, 0), // sized when an overlay is opened
+		peers:   newPeerList(nil),
+		logs:    mock.Logs(),
+		latency: make(map[string][]int),
+		// accounts are fetched live (tailscale switch --list) by Init / on open.
 	}
 }
 
-// Init implements tea.Model: fetch live status immediately and start both the
-// status-refresh ticker (node list) and the ping ticker (live latency for the
-// highlighted node).
+// Init implements tea.Model: fetch live status + account profiles immediately,
+// and start the status-refresh and ping tickers.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(fetchStatusCmd(), tickCmd(), pingTickCmd())
+	return tea.Batch(fetchStatusCmd(), fetchAccountsCmd(), tickCmd(), pingTickCmd())
 }
 
 // selectedPeer returns the peer currently highlighted in the list, and false
@@ -108,6 +107,15 @@ func (m Model) activeExitNodeName() string {
 		}
 	}
 	return "None"
+}
+
+// selectedAccount returns the account under the modal cursor, or false when the
+// list is empty / the cursor is out of range.
+func (m Model) selectedAccount() (types.Account, bool) {
+	if m.accountCursor >= 0 && m.accountCursor < len(m.accounts) {
+		return m.accounts[m.accountCursor], true
+	}
+	return types.Account{}, false
 }
 
 // activeExitNodeIP returns the Tailscale IP of the active exit node when one is

@@ -39,6 +39,71 @@ func Status(ctx context.Context) (types.LocalStatus, []types.Peer, error) {
 	return mapLocal(&raw), mapPeers(&raw), nil
 }
 
+// profile is the wire shape of one `tailscale switch --list --json` entry.
+type profile struct {
+	ID       string `json:"id"`
+	Account  string `json:"account"`
+	Nickname string `json:"nickname"`
+	Tailnet  string `json:"tailnet"`
+	Selected bool   `json:"selected"`
+}
+
+// Accounts lists the locally-stored Tailscale profiles via `tailscale switch
+// --list --json`, mapped to types.Account with the active profile sorted first.
+func Accounts(ctx context.Context) ([]types.Account, error) {
+	out, err := exec.CommandContext(ctx, "tailscale", "switch", "--list", "--json").Output()
+	if err != nil {
+		return nil, runError(err)
+	}
+	var profs []profile
+	if err := json.Unmarshal(out, &profs); err != nil {
+		return nil, fmt.Errorf("parsing accounts: %w", err)
+	}
+	accounts := make([]types.Account, 0, len(profs))
+	for _, p := range profs {
+		name := p.Account
+		if name == "" {
+			name = p.Nickname
+		}
+		accounts = append(accounts, types.Account{ID: p.ID, Email: name, Active: p.Selected})
+	}
+	// Active profile first (matches the mock layout), inactive order preserved.
+	sort.SliceStable(accounts, func(i, j int) bool {
+		return accounts[i].Active && !accounts[j].Active
+	})
+	return accounts, nil
+}
+
+// SwitchAccount switches the active profile to id (`tailscale switch <id>`).
+func SwitchAccount(ctx context.Context, id string) error {
+	out, err := exec.CommandContext(ctx, "tailscale", "switch", id).CombinedOutput()
+	return cliError("tailscale switch", out, err)
+}
+
+// RemoveAccount removes a stored profile (`tailscale switch remove <id>`). It
+// only forgets the local profile; it does not delete the account upstream.
+func RemoveAccount(ctx context.Context, id string) error {
+	out, err := exec.CommandContext(ctx, "tailscale", "switch", "remove", id).CombinedOutput()
+	return cliError("tailscale switch remove", out, err)
+}
+
+// Logout logs the current session out (`tailscale logout`).
+func Logout(ctx context.Context) error {
+	out, err := exec.CommandContext(ctx, "tailscale", "logout").CombinedOutput()
+	return cliError("tailscale logout", out, err)
+}
+
+// cliError wraps a failed CombinedOutput call, surfacing the CLI's own message.
+func cliError(label string, out []byte, err error) error {
+	if err == nil {
+		return nil
+	}
+	if msg := strings.TrimSpace(string(out)); msg != "" {
+		return fmt.Errorf("%s: %s", label, msg)
+	}
+	return fmt.Errorf("%s: %w", label, err)
+}
+
 // pingLatency matches the "... in 137ms" tail of a `tailscale ping` pong line.
 var pingLatency = regexp.MustCompile(`in ([\d.]+)\s*ms`)
 
