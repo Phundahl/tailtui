@@ -20,18 +20,15 @@ func newPeerList(peers []types.Peer) list.Model {
 	l := list.New(peerItems(peers), peerDelegate{}, 0, 0)
 
 	// Strip the default chrome we render ourselves: the NODES pane supplies the
-	// title in its top border; the filter input still appears while filtering.
+	// title in its top border. Built-in filtering is DISABLED — search is managed
+	// by hand (see search.go) for explicit Input/Normal modes and safe clamping.
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
 	l.SetShowPagination(false)
-	l.SetFilteringEnabled(true)
+	l.SetFilteringEnabled(false)
 
-	l.Styles.FilterPrompt = lipgloss.NewStyle().Foreground(styles.Primary)
-	l.Styles.FilterCursor = lipgloss.NewStyle().Foreground(styles.Primary)
 	l.Styles.NoItems = lipgloss.NewStyle().Foreground(styles.Subtle)
-	l.FilterInput.PromptStyle = lipgloss.NewStyle().Foreground(styles.Primary)
-	l.FilterInput.TextStyle = lipgloss.NewStyle().Foreground(styles.Fg)
 
 	return l
 }

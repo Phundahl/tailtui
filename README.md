@@ -15,15 +15,15 @@ A lightweight, keyboard-driven **terminal UI for Tailscale**, with a high-densit
 ┌─┤ LOCAL_NODE ├────────────┐ ┌─┤ PEER DETAILS: dc-subnet-01 ├───┐
 │ User / Host / IPs / State │ │ IDENTITY · OS · IP · Conn · Tags │
 │ Exit / Exit Latency       │ │ [e] 12 advertised routes         │
+│      [c] Disconnect       │ └──────────────────────────────────┘
+└───────────────────────────┘ ┌─┤ LATENCY HISTORY ├──────────────┐
+┌─┤ FILTER NODES ├──────────┐ │     ██      ▄▄                   │
+│ ❯ 󰖟 [EXIT] amsterdam-exit●│ │ ▂▂▂▂██▅▅████████▇▇               │
+│   󰒄 [ROUT] dc-subnet-01  ●│ │ ████████████████████            │
+│   󰌽 peer-dev-box         ●│ ├─┤ TERMINAL_LOGS ├────────────────┤
+│   󰌽 omarchy             ●│ │ > 14:55 [INFO] exit node set      │
 └───────────────────────────┘ └──────────────────────────────────┘
-┌─┤ FILTER NODES ├──────────┐ ┌─┤ LATENCY HISTORY ├──────────────┐
-│ ❯ 󰖟 [EXIT] amsterdam-exit●│ │     ██      ▄▄                   │
-│   󰒄 [ROUT] dc-subnet-01  ●│ │ ▂▂▂▂██▅▅████████▇▇               │
-│   󰌽 peer-dev-box         ●│ │ ████████████████████            │
-│   󰌽 omarchy             ●│ ├─┤ TERMINAL_LOGS ├────────────────┤
-│   ...                     │ │ > 14:55 [INFO] exit node set     │
-└───────────────────────────┘ └──────────────────────────────────┘
- [j/k] Nav  [/] Search  [x] Exit  [O] Operator  [v] Logs ● CONNECTED
+ [j/k] Nav  [/] Search  [c] Disconnect  [x] Exit Node  [v] Logs ● CONNECTED
 ```
 
 ## Tech stack
@@ -48,14 +48,15 @@ Working today:
 - **Live Tailscale data** — the local node, peer list, and details pane are populated from `tailscale status --json` and auto-refresh every 4s; the fetch runs off the UI thread (an async `tea.Cmd` under a timeout) so the interface never blocks. Your selection is preserved across refreshes and a daemon hiccup leaves the last good data on screen (with a red error line in the logs pane)
 - **Live latency graph** — the highlighted node is pinged every 2s (`tailscale ping`) off-thread; real round-trip times feed the Unicode bar graph and the MIN/AVG/MAX labels. Each node keeps its own rolling history, so moving between nodes shows live, per-node latency
 - **Live subnet routes** — the routes overlay (`e`) lists a node's real advertised/approved subnets (gateway + live latency + routing status) straight from the daemon
+- **Connection toggle** — the LOCAL_NODE button is state-aware (green `[c] Connect` when down, yellow `[c] Disconnect` when up); pressing `c` runs `tailscale up`/`down` interactively so auth URLs are visible, then logs the result and refreshes. The footer status (`● CONNECTED` / `○ DISCONNECTED`) tracks the live state
 - **Real exit-node control** — `x`/`t` sets or clears the active exit node via `tailscale set --exit-node=…`; the list updates instantly and the next poll reconciles with the daemon's true state (no flicker), surfacing any error in the logs pane
 - **Priority-sorted peer list** — exit nodes, then subnet routers, then online peers, then offline peers (each alphabetical), so the nodes you act on stay at the top
-- **Event log** — a capped (500-entry, FIFO) in-app log records exit-node actions, the real `tailscale set` error output, and connectivity changes. The bottom pane tails the latest line; `[v]` opens the full scrollable history in an opaque `─┤ TERMINAL_LOGS ├─` modal
+- **Event log** — a capped (500-entry, FIFO) in-app log records exit-node actions, the real `tailscale set` error output, and connectivity changes. Entries are **syntax-highlighted** by level (ERROR red, INFO green, WARN yellow, DEBUG accent) with dimmed timestamps for quick scanning. The bottom pane tails the latest line; `[v]` opens the full scrollable history in a wide (~85% of the screen, capped at 120 cols) opaque `─┤ TERMINAL_LOGS ├─` modal so entries sit on a single line
 - **Exit Latency** — the dashboard shows live ping latency to the active exit node (the node your traffic routes through), or `N/A` when none is set
-- **Optimized layout** — left column: your local node over the (flex) node list; right column: peer details over a tall multi-row latency chart that grows to fill the space, over the log tail. Subnet routers show an `[e] N advertised routes` hint. Borders stay sharp and flush at any terminal size
+- **Optimized, symmetric layout** — left column: your local node over the (flex) node list; right column: peer details over a tall multi-row latency chart that grows to fill the space, over the log tail. The local-node and peer-details panes share a fixed height so their borders line up exactly. Subnet routers show an `[e] N advertised routes` hint. Borders stay sharp and flush at any terminal size
 - **Operator setup (`O`)** — if Tailscale reports `checkprefs access denied`, press `O` to drop to the terminal and run `sudo tailscale set --operator=$USER` (password prompt and all), then the TUI restores itself and refreshes
 - Three-pane responsive layout (local dashboard, peer list, details) that resizes with the terminal
-- Peer list with `j/k`/arrow navigation (wrap-around at the top/bottom) and `/` fuzzy filtering (by hostname and tags)
+- Peer list with `j/k`/arrow navigation (wrap-around at the top/bottom) and an **fzf-style `/` search**: type to fuzzy-filter (hostname + tags), navigate the results while typing with `↑↓`/`Ctrl+j`/`Ctrl+k`, `Enter`/`Esc` to apply (keep filter), `Esc` again to clear. Cursor stays safely clamped — no crashes when filtering long lists
 - Details pane that updates instantly as you highlight different nodes
 - **Exit node toggle (`x`)** — set/clear the active exit node (only on exit-capable nodes), with a yellow `󰖟 EXIT` chip on the list row and a live `Exit:` field in the dashboard
 - **Subnet routes** — the details pane shows a peer's advertised routes (first 5, with a "+N more" hint); press `e` for a scrollable overlay of the full list
@@ -89,7 +90,8 @@ go run .
 | Key | Action |
 | :-- | :-- |
 | `j`/`k`, ↑/↓ | Navigate the peer list (wraps around at top/bottom) |
-| `/` | Search / filter nodes (`esc` to cancel) |
+| `/` | Open search; type to fuzzy-filter. `↑↓`/`Ctrl+j`/`Ctrl+k` navigate while typing; `Enter`/`Esc` apply; `Esc` (in list) clears |
+| `c` | Connect / disconnect the local node — runs `tailscale up`/`down` interactively (shows auth URLs) |
 | `x` / `t` | Toggle the highlighted peer as the active exit node — runs `tailscale set --exit-node` (exit-capable only) |
 | `e` | Expand a subnet router's advertised routes (overlay) |
 | `v` | Open/close the full event-log overlay (`j/k` scroll) |
@@ -152,5 +154,9 @@ design-spec.md         authoritative UI/UX specification
 - [x] Phase 8 — event log system (FIFO ring + `[v]` overlay), footer fix, Exit Latency readout
 - [x] Phase 9 — layout reorg (multi-row latency chart), flush-border fix, `[O]` sudo operator setup
 - [x] Phase 10 — final two-column grid + restored subnet-router routes hint
+- [x] Phase 11 — symmetric top panes (locked heights) + wide log overlay
+- [x] Phase 11.5 — log level syntax highlighting (color-coded levels, dimmed timestamps)
+- [x] Phase 12 — interactive connection toggle (`c`, `tailscale up`/`down`) + footer UX polish
+- [x] Phase 13 — fzf-style search (Input/Normal modes, `Ctrl+j/k` nav), cursor-clamp crash fix, dynamic footer
 - [ ] Remaining node actions (SSH, ping-as-action)
 - [ ] Live account switching (`tailscale switch`)

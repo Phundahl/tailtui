@@ -40,6 +40,24 @@ func overlayWidth(termW int) int {
 	return w
 }
 
+// logOverlayWidth returns the inner content width for the log overlay. Logs
+// (timestamp + level + network paths) are wide, so this modal takes ~85% of the
+// terminal — capped at 120 cols — so most entries fit on a single line, far
+// wider than the standard overlayWidth used by the other modals.
+func logOverlayWidth(termW int) int {
+	w := termW * 85 / 100
+	if max := termW - 2*(modalHPad+modalBorder) - 2; w > max {
+		w = max
+	}
+	if w > 120 {
+		w = 120
+	}
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
 // overlayHeight returns the viewport height: just enough to show contentLines,
 // but never taller than the terminal allows (the viewport scrolls past that).
 func overlayHeight(termH, contentLines int) int {
@@ -104,7 +122,7 @@ func (m Model) openAccounts() Model {
 // to the most recent entry.
 func (m Model) openLogs() Model {
 	m.state = stateLogs
-	w := overlayWidth(m.width)
+	w := logOverlayWidth(m.width)
 	content := logBody(m.logs, w)
 	m.overlay = newOverlayVP(w, logViewportHeight(m.height, countLines(content)), content)
 	m.overlay.GotoBottom() // newest entries are appended last
@@ -126,8 +144,9 @@ func (m Model) resizeOverlay() Model {
 	case stateAccounts:
 		content = m.accountsBody(w)
 	case stateLogs:
-		content = logBody(m.logs, w)
-		m.overlay.Width = w
+		lw := logOverlayWidth(m.width) // wider than the other modals
+		content = logBody(m.logs, lw)
+		m.overlay.Width = lw
 		m.overlay.Height = logViewportHeight(m.height, countLines(content))
 		m.overlay.SetContent(content)
 		return m
@@ -323,16 +342,14 @@ func logBody(logs []types.LogEntry, w int) string {
 	return strings.Join(lines, "\n")
 }
 
-// logLine formats one entry "HH:MM:SS [LEVEL] message" on the modal surface,
-// coloring the level chip (ERROR red, WARN yellow, else dim).
+// logLine formats one entry "HH:MM:SS [LEVEL] message" on the modal surface:
+// muted timestamp, level chip colored by severity (theme) and bold to match the
+// other modal status chips, and the message in the default text color.
 func logLine(e types.LogEntry) string {
-	lvl := styles.ModalDim
-	switch e.Level {
-	case "ERROR":
-		lvl = styles.StatusErr
-	case "WARN":
-		lvl = styles.StatusWarn
-	}
+	lvl := lipgloss.NewStyle().
+		Foreground(styles.LogLevelColor(e.Level)).
+		Background(styles.Surface).
+		Bold(true)
 	return styles.ModalDim.Render(e.Time+" ") +
 		lvl.Render("["+e.Level+"]") +
 		styles.ModalText.Render(" "+e.Message)
@@ -426,7 +443,14 @@ func helpBody(w int) string {
 		{"Switch Pane Left / Right", "h / l"},
 		{"Jump to Top / Bottom", "g / G"},
 	})...)
+	lines = append(lines, group("SEARCH / FILTER", [][2]string{
+		{"Open / Edit Filter", "/"},
+		{"Navigate While Typing", "↑↓  Ctrl+j/k"},
+		{"Apply Filter (blur box)", "Enter / Esc"},
+		{"Clear Filter", "Esc (in list)"},
+	})...)
 	lines = append(lines, group("NODE ACTIONS", [][2]string{
+		{"Connect / Disconnect", "c"},
 		{"Toggle Exit Node", "x / t"},
 		{"Expand Subnet Routes", "e"},
 		{"Operator Setup (sudo)", "O"},

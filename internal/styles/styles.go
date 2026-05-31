@@ -107,6 +107,25 @@ func Apply(t Theme) {
 	AccountActiveSub = lipgloss.NewStyle().Foreground(Bg).Background(Primary)
 }
 
+// LogLevelColor maps a log level to its theme color, so the level chip is
+// scannable in both the tail pane and the [v] overlay. ERROR → error (red),
+// INFO → primary accent (green), WARN → warning (yellow), DEBUG → secondary
+// accent; anything else falls back to the dim/subtle color.
+func LogLevelColor(level string) lipgloss.Color {
+	switch level {
+	case "ERROR":
+		return Danger
+	case "INFO":
+		return Primary
+	case "WARN":
+		return Warn
+	case "DEBUG":
+		return Secondary
+	default:
+		return Subtle
+	}
+}
+
 // ModalFill returns a style that paints content to the given width with the
 // Surface color, padding the remainder so the line is fully opaque.
 func ModalFill(width int) lipgloss.Style {
