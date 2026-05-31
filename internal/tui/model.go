@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/Phundahl/tailscaleTUI/internal/mock"
-	"github.com/Phundahl/tailscaleTUI/internal/types"
+	"github.com/Phundahl/tailtui/internal/mock"
+	"github.com/Phundahl/tailtui/internal/types"
 )
 
 // appState is the top-level UI state machine. Only one overlay is active at a

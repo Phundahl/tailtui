@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Phundahl/tailscaleTUI/internal/styles"
-	"github.com/Phundahl/tailscaleTUI/internal/types"
+	"github.com/Phundahl/tailtui/internal/styles"
+	"github.com/Phundahl/tailtui/internal/types"
 )
 
 // newPeerList builds the bubbles/list model for the peer pane. Special nodes

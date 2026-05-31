@@ -1,4 +1,4 @@
-module github.com/Phundahl/tailscaleTUI
+module github.com/Phundahl/tailtui
 
 go 1.26.3
 

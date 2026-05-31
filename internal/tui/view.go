@@ -6,8 +6,14 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Phundahl/tailscaleTUI/internal/styles"
-	"github.com/Phundahl/tailscaleTUI/internal/types"
+	"github.com/Phundahl/tailtui/internal/styles"
+	"github.com/Phundahl/tailtui/internal/types"
+)
+
+// Branding shown in the UI chrome.
+const (
+	appName    = "tailTUI"
+	appVersion = "v1.0.0"
 )
 
 // Fixed layout constants.
@@ -120,7 +126,7 @@ func (m Model) layout() layout {
 // View implements tea.Model and assembles the full-screen layout.
 func (m Model) View() string {
 	if !m.ready {
-		return "Initializing Tailscale TUI..."
+		return "Initializing " + appName + "..."
 	}
 	if m.width < minWidth || m.height < minHeight {
 		return fmt.Sprintf("Terminal too small (need at least %dx%d).", minWidth, minHeight)
@@ -157,7 +163,7 @@ func (m Model) View() string {
 // --- header / footer ---------------------------------------------------------
 
 func (m Model) renderHeader() string {
-	left := styles.Title.Render("TAILSCALE_TUI_V1.0")
+	left := styles.Title.Render(appName)
 	right := styles.Dim.Render("(q)uit  (?)help  ⚙")
 	return styles.Bar(m.width, left, right)
 }
@@ -178,7 +184,9 @@ func (m Model) renderFooter() string {
 	if m.searchFocused {
 		left = styles.Dim.Render("[↑↓ Ctrl+j/k] Nav   [Enter/Esc] Apply   type to filter")
 	}
-	right := icon + status + styles.Dim.Render("   [l] ACCOUNTS")
+	// Version pinned to the far-right edge (Bar right-justifies this segment),
+	// kept on the single footer line.
+	right := icon + status + styles.Dim.Render("   [l] ACCOUNTS   "+appVersion)
 	return styles.Bar(m.width, left, right)
 }
 
