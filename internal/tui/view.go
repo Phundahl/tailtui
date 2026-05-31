@@ -14,45 +14,91 @@ import (
 const (
 	headerHeight = 1
 	footerHeight = 1
-	logsHeight   = 5  // TERMINAL_LOGS pane (border + log lines)
+	logsHeight   = 5  // TERMINAL_LOGS pane (border + tail lines)
 	localNodeH   = 11 // LOCAL_NODE pane height (border + fields + Connect)
+	minLatencyH  = 4  // LATENCY HISTORY pane never shrinks below this
 	gutter       = 1  // column gap between the left and right columns
 	minWidth     = 72
 	minHeight    = 24
+
+	// PEER DETAILS content lines: IDENTITY + OS + IP + Conn + Version + Tags +
+	// Last Seen; the advertised-routes hint adds one more (see detailLines).
+	detailsBaseLines = 7
+
+	// Floors used when the terminal is too short to honour the fixed heights.
+	localFloor   = 6
+	nodesFloor   = 3
+	detailsFloor = 6 // IDENTITY + OS + IP + Conn (+ border)
+	logsFloor    = 3
 )
 
 // layout holds the computed geometry of every region for a given terminal size.
+//
+// Phase 10 grid (two flush columns, each summing to bodyH):
+//   - Left:  LOCAL_NODE (fixed) over FILTER NODES list (flex).
+//   - Right: PEER DETAILS (fixed) over LATENCY HISTORY (flex) over TERMINAL_LOGS (fixed).
 type layout struct {
-	leftW, rightW    int // column widths (sum + gutter == width)
-	midH             int // height of the middle band (between header and logs)
-	topH             int // height of the top pane in each column (aligned)
-	nodesH, latencyH int // bottom pane heights per column
-	listW, listH     int // peer list dimensions inside the NODES pane
+	leftW, rightW int // column widths (leftW + gutter + rightW == width)
+	bodyH         int // height of the body band (between header and footer)
+
+	localH, nodesH            int // left-column pane heights (sum == bodyH)
+	detailsH, latencyH, logsH int // right-column pane heights (sum == bodyH)
+
+	listW, listH int // peer list dimensions inside the NODES pane
 }
 
-func computeLayout(w, h int) layout {
-	midH := h - headerHeight - footerHeight - logsHeight
+// computeLayout derives the geometry for a terminal of w×h. detailLines is the
+// number of content rows PEER DETAILS needs (so a subnet router's routes hint
+// gets a row); the LATENCY pane flexes to absorb the difference.
+func computeLayout(w, h, detailLines int) layout {
+	bodyH := h - headerHeight - footerHeight
 
 	leftW := w * 2 / 5
 	rightW := w - leftW - gutter
 
-	topH := localNodeH
-	if topH > midH-4 {
-		topH = midH - 4 // keep at least a few rows for the lower panes
+	// --- left column: LOCAL_NODE (fixed) over NODES list (flex) ---
+	localH := localNodeH
+	if localH > bodyH-nodesFloor {
+		localH = bodyH - nodesFloor
 	}
-	if topH < 3 {
-		topH = 3
+	if localH < localFloor {
+		localH = localFloor
+	}
+	nodesH := bodyH - localH
+	if nodesH < 1 {
+		nodesH = 1
+	}
+
+	// --- right column: PEER DETAILS (fixed) over LATENCY (flex) over LOGS (fixed) ---
+	detailsH := detailLines + 2 // + border
+	logsH := logsHeight
+	// Reserve at least minLatencyH for the flex latency pane; if it doesn't fit,
+	// shrink PEER DETAILS toward its floor, then the logs tail.
+	if over := detailsH + logsH + minLatencyH - bodyH; over > 0 {
+		if take := min(over, detailsH-detailsFloor); take > 0 {
+			detailsH -= take
+			over -= take
+		}
+		if take := min(over, logsH-logsFloor); take > 0 {
+			logsH -= take
+		}
+	}
+	latencyH := bodyH - detailsH - logsH // flex: column sums to bodyH
+	if latencyH < 1 {
+		latencyH = 1
 	}
 
 	lay := layout{
 		leftW:    leftW,
 		rightW:   rightW,
-		midH:     midH,
-		topH:     topH,
-		nodesH:   midH - topH,
-		latencyH: midH - topH,
+		bodyH:    bodyH,
+		localH:   localH,
+		nodesH:   nodesH,
+		detailsH: detailsH,
+		latencyH: latencyH,
+		logsH:    logsH,
 		listW:    styles.ContentWidth(leftW),
-		listH:    midH - topH - 2, // NODES pane inner height
+		listH:    nodesH - 2, // NODES pane inner height
 	}
 	if lay.listH < 1 {
 		lay.listH = 1
@@ -61,6 +107,23 @@ func computeLayout(w, h int) layout {
 		lay.listW = 1
 	}
 	return lay
+}
+
+// detailLines reports how many content rows the PEER DETAILS pane needs for the
+// current selection: the base identity fields, plus one for the advertised-
+// routes hint when the highlighted peer is a subnet router.
+func (m Model) detailLines() int {
+	n := detailsBaseLines
+	if p, ok := m.selectedPeer(); ok && len(p.AdvertisedRoutes) > 0 {
+		n++
+	}
+	return n
+}
+
+// layout computes the current geometry, accounting for the selected peer's
+// detail height. Used by both View (drawing) and Update (sizing the list).
+func (m Model) layout() layout {
+	return computeLayout(m.width, m.height, m.detailLines())
 }
 
 // View implements tea.Model and assembles the full-screen layout.
@@ -72,22 +135,24 @@ func (m Model) View() string {
 		return fmt.Sprintf("Terminal too small (need at least %dx%d).", minWidth, minHeight)
 	}
 
-	lay := computeLayout(m.width, m.height)
+	lay := m.layout()
 
+	// Left: LOCAL_NODE (fixed) over the FILTER NODES list (flex).
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		m.renderLocalNode(lay),
 		m.renderNodes(lay),
 	)
+	// Right: PEER DETAILS (fixed) over LATENCY (flex) over TERMINAL_LOGS tail.
 	right := lipgloss.JoinVertical(lipgloss.Left,
 		m.renderDetails(lay),
 		m.renderLatency(lay),
+		m.renderLogs(lay),
 	)
-	mid := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gutter), right)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gutter), right)
 
 	base := lipgloss.JoinVertical(lipgloss.Left,
 		m.renderHeader(),
-		mid,
-		m.renderLogs(),
+		body,
 		m.renderFooter(),
 	)
 
@@ -107,7 +172,9 @@ func (m Model) renderHeader() string {
 }
 
 func (m Model) renderFooter() string {
-	left := styles.Dim.Render("[j/k] Navigate  [/] Search  [s] SSH  [p] Ping  [t] Connect  [e] Expand  [?] Help")
+	// Help is already advertised in the header ("(?)help"), so it's omitted here
+	// to leave room for the action hints. Bar() clips this responsively anyway.
+	left := styles.Dim.Render("[j/k] Nav  [/] Search  [x] Exit  [O] Operator  [e] Routes  [v] Logs")
 	right := styles.Online.Render("●") + styles.Dim.Render(" CONNECTED   [l] ACCOUNTS")
 	return styles.Bar(m.width, left, right)
 }
@@ -124,16 +191,17 @@ func (m Model) renderLocalNode(lay layout) string {
 		field("Tailscale IP:", l.TailscaleIP),
 		styles.Label.Render("State:") + " " + connSymbol(l.Conn) + " " + styles.Value.Render(connText(l.Conn, l.Relay)),
 		styles.Label.Render("Exit:") + " " + m.renderExitValue(),
-		styles.Label.Render("Latency:") + " " + styles.Value.Render(fmt.Sprintf("%dms", l.LatencyMs)) + " " + styles.Sparkline(l.LatencyHistory),
+		styles.Label.Render("Exit Latency:") + " " + m.renderExitLatency(),
 		"",
 		lipgloss.PlaceHorizontal(cw, lipgloss.Center, styles.Button.Render("[ Connect ]")),
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left, fields...)
-	return styles.Pane("LOCAL_NODE", body, lay.leftW, lay.topH, false)
+	return styles.Pane("LOCAL_NODE", body, lay.leftW, lay.localH, false)
 }
 
 func (m Model) renderNodes(lay layout) string {
-	// The bubbles list is the focused element, so the NODES pane gets the bright border.
+	// The bubbles list is the focused element, so the NODES pane gets the bright
+	// border. It flexes to fill the left column below LOCAL_NODE.
 	return styles.Pane("FILTER NODES...", m.peers.View(), lay.leftW, lay.nodesH, true)
 }
 
@@ -145,12 +213,28 @@ func (m Model) renderExitValue() string {
 	return styles.ExitName.Render("⏏ " + name)
 }
 
+// renderExitLatency shows the live ping latency to the active exit node (the
+// node all traffic is routed through), or N/A when none is active. The exit
+// node is pinged by the ticker regardless of selection, so this stays live; "—"
+// is shown briefly until the first sample lands.
+func (m Model) renderExitLatency() string {
+	ip := m.activeExitNodeIP()
+	if ip == "" {
+		return styles.Dim.Render("N/A")
+	}
+	h := m.latency[ip]
+	if len(h) == 0 {
+		return styles.Dim.Render("—")
+	}
+	return styles.Value.Render(fmt.Sprintf("%dms", h[len(h)-1])) + " " + styles.Sparkline(h)
+}
+
 // --- right column: PEER DETAILS + LATENCY HISTORY ----------------------------
 
 func (m Model) renderDetails(lay layout) string {
 	p, ok := m.selectedPeer()
 	if !ok {
-		return styles.Pane("PEER DETAILS", styles.Dim.Render("No node selected."), lay.rightW, lay.topH, false)
+		return styles.Pane("PEER DETAILS", styles.Dim.Render("No node selected."), lay.rightW, lay.detailsH, false)
 	}
 	lines := []string{
 		styles.Label.Render("IDENTITY"),
@@ -165,29 +249,60 @@ func (m Model) renderDetails(lay layout) string {
 		lines = append(lines, styles.Caution.Render(fmt.Sprintf("[e] %d advertised routes", n)))
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return styles.Pane("PEER DETAILS: "+p.Hostname, body, lay.rightW, lay.topH, false)
+	return styles.Pane("PEER DETAILS: "+p.Hostname, body, lay.rightW, lay.detailsH, false)
 }
 
 func (m Model) renderLatency(lay layout) string {
 	cw := styles.ContentWidth(lay.rightW)
+	// The chart fills the pane: inner height minus the stats line and its spacer.
+	graphH := lay.latencyH - 2 - 2
+	if graphH < 1 {
+		graphH = 1
+	}
 	var graph, stats string
 	if p, ok := m.selectedPeer(); ok {
 		stats = latencyStats(p.LatencyHistory)
-		graph = styles.LatencyGraphWidth(p.LatencyHistory, cw)
+		graph = styles.LatencyGraphArea(p.LatencyHistory, cw, graphH)
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left, stats, "", graph)
-	return styles.Pane("LATENCY HISTORY (60s)", body, lay.rightW, lay.latencyH, false)
+	return styles.Pane("LATENCY HISTORY", body, lay.rightW, lay.latencyH, false)
 }
 
-// --- bottom: TERMINAL_LOGS ---------------------------------------------------
+// --- right column bottom: TERMINAL_LOGS tail ---------------------------------
 
-func (m Model) renderLogs() string {
-	lines := make([]string, 0, len(m.logs))
-	for _, e := range m.logs {
-		lines = append(lines, styles.Dim.Render("> ["+e.Level+"]")+" "+styles.Value.Render(e.Message))
+func (m Model) renderLogs(lay layout) string {
+	var lines []string
+	if m.fetchErr != nil {
+		danger := lipgloss.NewStyle().Foreground(styles.Danger)
+		lines = append(lines, danger.Render("> [ERROR] "+m.fetchErr.Error()))
+	}
+	// Tail only: show the most recent entries; the full history lives in the [v]
+	// log overlay. Keeps the pane a fixed-height "ticker".
+	const tail = 2
+	if start := len(m.logs) - tail; start >= 0 {
+		for _, e := range m.logs[start:] {
+			lines = append(lines, logTailLine(e))
+		}
+	} else {
+		for _, e := range m.logs {
+			lines = append(lines, logTailLine(e))
+		}
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return styles.Pane("TERMINAL_LOGS", body, m.width, logsHeight, false)
+	return styles.Pane("TERMINAL_LOGS", body, lay.rightW, lay.logsH, false)
+}
+
+// logTailLine formats one entry for the bottom ticker pane (over the base
+// background), coloring the level chip by severity.
+func logTailLine(e types.LogEntry) string {
+	lvl := styles.Dim
+	switch e.Level {
+	case "ERROR":
+		lvl = lipgloss.NewStyle().Foreground(styles.Danger)
+	case "WARN":
+		lvl = styles.Caution
+	}
+	return styles.Dim.Render("> "+e.Time+" ") + lvl.Render("["+e.Level+"]") + " " + styles.Value.Render(e.Message)
 }
 
 // --- small helpers -----------------------------------------------------------

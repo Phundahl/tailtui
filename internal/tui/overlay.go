@@ -100,6 +100,17 @@ func (m Model) openAccounts() Model {
 	return m
 }
 
+// openLogs transitions to the log overlay, showing the full log ring scrolled
+// to the most recent entry.
+func (m Model) openLogs() Model {
+	m.state = stateLogs
+	w := overlayWidth(m.width)
+	content := logBody(m.logs, w)
+	m.overlay = newOverlayVP(w, logViewportHeight(m.height, countLines(content)), content)
+	m.overlay.GotoBottom() // newest entries are appended last
+	return m
+}
+
 // resizeOverlay re-sizes and re-renders the active overlay after a window
 // resize, so the modal tracks the terminal dimensions.
 func (m Model) resizeOverlay() Model {
@@ -114,6 +125,12 @@ func (m Model) resizeOverlay() Model {
 		}
 	case stateAccounts:
 		content = m.accountsBody(w)
+	case stateLogs:
+		content = logBody(m.logs, w)
+		m.overlay.Width = w
+		m.overlay.Height = logViewportHeight(m.height, countLines(content))
+		m.overlay.SetContent(content)
+		return m
 	}
 	m.overlay.Width = w
 	m.overlay.Height = overlayHeight(m.height, countLines(content))
@@ -137,6 +154,12 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateMain
 		}
 		return m, nil
+	case stateLogs:
+		if key == "v" {
+			m.state = stateMain
+			return m, nil
+		}
+		// Other keys (j/k, arrows, page) scroll the log viewport.
 	case stateAccounts:
 		// The accounts modal owns all keys: navigate the cursor and switch the
 		// active session; nothing falls through to the background or a viewport.
@@ -171,6 +194,12 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // the whole bounding box — padding and border included — overwrites whatever is
 // behind it. A bright rounded border + colored title make it float.
 func (m Model) renderOverlay(base string) string {
+	// The log overlay uses the pane-style titled border (─┤ TERMINAL_LOGS ├─) to
+	// mirror the base TERMINAL_LOGS pane, rather than the tab-title chrome.
+	if m.state == stateLogs {
+		return m.renderLogOverlay(base)
+	}
+
 	w := m.overlay.Width
 
 	var title, hint string
@@ -217,6 +246,96 @@ func (m Model) renderOverlay(base string) string {
 		Render(inner)
 
 	return overlayCenter(base, modal)
+}
+
+// logChrome counts the non-viewport lines of the log overlay: top border, a
+// fixed hint line, the bottom border, plus the top/bottom vertical padding.
+const logChrome = 3 + 2*modalVPad
+
+// logViewportHeight sizes the scrollable log area to fit the content but never
+// overflow the terminal (the viewport scrolls past that).
+func logViewportHeight(termH, contentLines int) int {
+	max := termH - 2*modalBorder - logChrome
+	h := contentLines
+	if h > max {
+		h = max
+	}
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// renderLogOverlay draws the log modal as a fully opaque box whose top border
+// embeds the title (┌─┤ TERMINAL_LOGS ├──┐), matching the brutalist Pane used
+// in the base layout. Every cell carries the Surface background so nothing
+// behind it bleeds through; overlayCenter then composites it on top.
+func (m Model) renderLogOverlay(base string) string {
+	w := m.overlay.Width
+	innerW := w + 2*modalHPad // cells between the │ borders (content + padding)
+
+	border := lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.Surface)
+	side := border.Render("│")
+	padCell := styles.ModalFill(modalHPad).Render("")
+	blank := side + styles.ModalFill(innerW).Render("") + side
+
+	lines := []string{modalTitledTop("TERMINAL_LOGS", innerW)}
+	for i := 0; i < modalVPad; i++ {
+		lines = append(lines, blank)
+	}
+	for _, ln := range strings.Split(m.overlay.View(), "\n") {
+		lines = append(lines, side+padCell+ln+padCell+side)
+	}
+	// Fixed hint row (not part of the scrollable area).
+	hintTxt := styles.ModalDim.Render("[j/k] Scroll   [v]/[Esc] Close")
+	lines = append(lines, side+padCell+styles.ModalFill(w).Render(hintTxt)+padCell+side)
+	for i := 0; i < modalVPad; i++ {
+		lines = append(lines, blank)
+	}
+	lines = append(lines, border.Render("└"+strings.Repeat("─", innerW)+"┘"))
+
+	return overlayCenter(base, strings.Join(lines, "\n"))
+}
+
+// modalTitledTop renders an opaque "┌─┤ TITLE ├────┐" top border exactly innerW
+// cells wide (the span between the corner glyphs), Surface-backed throughout.
+func modalTitledTop(title string, innerW int) string {
+	border := lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.Surface)
+	const lead, trail = "─┤ ", " ├"
+	used := lipgloss.Width(lead) + lipgloss.Width(title) + lipgloss.Width(trail)
+	if dashes := innerW - used; dashes >= 0 {
+		return border.Render("┌"+lead) +
+			styles.ModalTitle.Render(title) +
+			border.Render(trail+strings.Repeat("─", dashes)+"┐")
+	}
+	return border.Render("┌" + strings.Repeat("─", innerW) + "┐")
+}
+
+// logBody renders the full log ring for the overlay, one opaque line per entry.
+func logBody(logs []types.LogEntry, w int) string {
+	if len(logs) == 0 {
+		return modalLine(w, styles.ModalDim.Render("No log entries yet."))
+	}
+	lines := make([]string, len(logs))
+	for i, e := range logs {
+		lines[i] = modalLine(w, logLine(e))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// logLine formats one entry "HH:MM:SS [LEVEL] message" on the modal surface,
+// coloring the level chip (ERROR red, WARN yellow, else dim).
+func logLine(e types.LogEntry) string {
+	lvl := styles.ModalDim
+	switch e.Level {
+	case "ERROR":
+		lvl = styles.StatusErr
+	case "WARN":
+		lvl = styles.StatusWarn
+	}
+	return styles.ModalDim.Render(e.Time+" ") +
+		lvl.Render("["+e.Level+"]") +
+		styles.ModalText.Render(" "+e.Message)
 }
 
 // modalLine paints a single content line opaque across the full modal width.
@@ -308,12 +427,13 @@ func helpBody(w int) string {
 		{"Jump to Top / Bottom", "g / G"},
 	})...)
 	lines = append(lines, group("NODE ACTIONS", [][2]string{
-		{"Open SSH Session", "s"},
-		{"Test Connectivity (Ping)", "p"},
-		{"Toggle Connection State", "t"},
+		{"Toggle Exit Node", "x / t"},
+		{"Expand Subnet Routes", "e"},
+		{"Operator Setup (sudo)", "O"},
 	})...)
 	lines = append(lines, group("GLOBAL", [][2]string{
 		{"Switch Accounts", "l"},
+		{"View Logs", "v"},
 		{"Toggle Help Overlay", "?"},
 		{"Quit Application", "q"},
 	})...)
@@ -324,8 +444,11 @@ func helpBody(w int) string {
 	return strings.Join(lines, "\n")
 }
 
-// routesBody renders the advertised routes as an aligned routing table
-// (DESTINATION / GATEWAY / LATENCY / STATUS) with color-coded status chips.
+// routesBody renders the peer's live advertised/approved subnet routes as an
+// aligned routing table (DESTINATION / GATEWAY / LATENCY / STATUS). The routes
+// and gateway come straight from the daemon (Peer.AdvertisedRoutes are the
+// node's PrimaryRoutes); LATENCY is the node's live ping reading and every
+// approved route is actively ROUTING through this gateway.
 func routesBody(p types.Peer, w int) string {
 	dest := w * 36 / 100
 	gw := w * 26 / 100
@@ -335,34 +458,19 @@ func routesBody(p types.Peer, w int) string {
 		padCol("DESTINATION", dest) + padCol("GATEWAY", gw) + padCol("LATENCY", lat) + "STATUS")
 	lines := []string{modalLine(w, header), modalLine(w, "")}
 
-	for i, r := range p.AdvertisedRoutes {
+	latency := "—"
+	if p.LatencyMs > 0 {
+		latency = fmt.Sprintf("%dms", p.LatencyMs)
+	}
+
+	for _, r := range p.AdvertisedRoutes {
 		row := styles.ModalText.Render(padCol(r, dest)) +
 			styles.ModalText.Render(padCol(p.TailscaleIP, gw)) +
-			styles.ModalText.Render(padCol(routeLatency(i), lat)) +
-			routeStatus(i)
+			styles.ModalText.Render(padCol(latency, lat)) +
+			styles.StatusOK.Render("[ ROUTING ]")
 		lines = append(lines, modalLine(w, row))
 	}
 	return strings.Join(lines, "\n")
-}
-
-// routeLatency / routeStatus synthesize deterministic per-route mock columns
-// (real values arrive with the future tailscale adapter).
-func routeLatency(i int) string {
-	if i%4 == 3 {
-		return "ERR"
-	}
-	return fmt.Sprintf("%dms", 8+i*6)
-}
-
-func routeStatus(i int) string {
-	switch i % 4 {
-	case 2:
-		return styles.StatusWarn.Render("[ DISABLED ]")
-	case 3:
-		return styles.StatusErr.Render("[ CONFLICT ]")
-	default:
-		return styles.StatusOK.Render("[ ROUTING ]")
-	}
 }
 
 // padCol pads (or truncates) plain ASCII text s to exactly width cells.

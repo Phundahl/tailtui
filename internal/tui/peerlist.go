@@ -17,13 +17,7 @@ import (
 // newPeerList builds the bubbles/list model for the peer pane. Special nodes
 // (exit nodes, subnet routers) are sorted to the top per the design spec.
 func newPeerList(peers []types.Peer) list.Model {
-	sorted := sortPeers(peers)
-	items := make([]list.Item, len(sorted))
-	for i, p := range sorted {
-		items[i] = p
-	}
-
-	l := list.New(items, peerDelegate{}, 0, 0)
+	l := list.New(peerItems(peers), peerDelegate{}, 0, 0)
 
 	// Strip the default chrome we render ourselves: the NODES pane supplies the
 	// title in its top border; the filter input still appears while filtering.
@@ -42,8 +36,23 @@ func newPeerList(peers []types.Peer) list.Model {
 	return l
 }
 
+// peerItems sorts the peers (special nodes first) and wraps them as list.Items,
+// the form the bubbles/list consumes. Shared by initial construction and the
+// live-refresh path (applyStatus).
+func peerItems(peers []types.Peer) []list.Item {
+	sorted := sortPeers(peers)
+	items := make([]list.Item, len(sorted))
+	for i, p := range sorted {
+		items[i] = p
+	}
+	return items
+}
+
 // sortPeers returns a copy ordered with exit nodes and subnet routers first,
-// preserving the relative order within each group (stable).
+// preserving the relative order within each group (stable). The adapter is now
+// authoritative for the full ordering (exit → subnet → online → offline, each
+// alphabetical); this stable pass keeps that order intact while guaranteeing
+// special nodes lead even for any non-adapter item source.
 func sortPeers(peers []types.Peer) []types.Peer {
 	out := make([]types.Peer, len(peers))
 	copy(out, peers)

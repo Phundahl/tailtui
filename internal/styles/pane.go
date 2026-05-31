@@ -29,9 +29,17 @@ func Pane(title, body string, width, height int, focused bool) string {
 	bs := lipgloss.NewStyle().Foreground(bcol)
 	innerW := width - 2
 
+	// MaxHeight/MaxWidth CLIP the content to exactly the pane interior. lipgloss
+	// Height/Width are minimums (they pad but never truncate), so without the Max*
+	// caps an over-tall body — e.g. a wrapped log line — would make the pane
+	// render more rows than requested, overflowing the layout and scrolling the
+	// top borders off the alt-screen. Clipping guarantees every pane is exactly
+	// width×height, keeping the whole layout flush.
 	content := lipgloss.NewStyle().
 		Width(innerW).
 		Height(height-2).
+		MaxHeight(height-2).
+		MaxWidth(innerW).
 		Padding(0, boxHPad).
 		Render(body)
 
