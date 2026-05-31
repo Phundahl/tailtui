@@ -104,6 +104,66 @@ func setExitNodeCmd(ip, desc string) tea.Cmd {
 	}
 }
 
+// accountsMsg carries the result of a `tailscale switch --list` fetch.
+type accountsMsg struct {
+	accounts []types.Account
+	err      error
+}
+
+// accountActionMsg carries the result of an account-mutating command (switch,
+// remove, logout, login). desc is logged; on completion the model refreshes the
+// account list and status so the UI reflects the new reality.
+type accountActionMsg struct {
+	desc string
+	err  error
+}
+
+// fetchAccountsCmd lists the local profiles off the UI thread.
+func fetchAccountsCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		accounts, err := tailscale.Accounts(ctx)
+		return accountsMsg{accounts: accounts, err: err}
+	}
+}
+
+// switchAccountCmd switches the active profile (`tailscale switch <id>`).
+func switchAccountCmd(id, name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		return accountActionMsg{desc: "switched account → " + name, err: tailscale.SwitchAccount(ctx, id)}
+	}
+}
+
+// removeAccountCmd forgets a stored profile (`tailscale switch remove <id>`).
+func removeAccountCmd(id, name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return accountActionMsg{desc: "removed account " + name, err: tailscale.RemoveAccount(ctx, id)}
+	}
+}
+
+// logoutCmd logs the current session out (`tailscale logout`).
+func logoutCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		return accountActionMsg{desc: "logged out", err: tailscale.Logout(ctx)}
+	}
+}
+
+// addAccountCmd runs `tailscale login` interactively via tea.ExecProcess so the
+// user can complete the auth URL in the terminal, then refreshes on return.
+func addAccountCmd() tea.Cmd {
+	c := exec.Command("tailscale", "login")
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return accountActionMsg{desc: "added account (tailscale login)", err: err}
+	})
+}
+
 // operatorDoneMsg is delivered after the interactive operator-setup command
 // finishes and the TUI has been restored.
 type operatorDoneMsg struct{ err error }

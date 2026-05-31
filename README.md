@@ -53,6 +53,7 @@ Working today:
 - **Priority-sorted peer list** — exit nodes, then subnet routers, then online peers, then offline peers (each alphabetical), so the nodes you act on stay at the top
 - **Event log** — a capped (500-entry, FIFO) in-app log records exit-node actions, the real `tailscale set` error output, and connectivity changes. Entries are **syntax-highlighted** by level (ERROR red, INFO green, WARN yellow, DEBUG accent) with dimmed timestamps for quick scanning. The bottom pane tails the latest line; `[v]` opens the full scrollable history in a wide (~85% of the screen, capped at 120 cols) opaque `─┤ TERMINAL_LOGS ├─` modal so entries sit on a single line
 - **Exit Latency** — the dashboard shows live ping latency to the active exit node (the node your traffic routes through), or `N/A` when none is set
+- **Account management (`l`)** — lists your real Tailscale profiles (`tailscale switch --list`); switch (`Enter`), add a login (`a`, interactive), remove (`d`), or log out (`l`), all wired to the CLI and logged
 - **Optimized, symmetric layout** — left column: your local node over the (flex) node list; right column: peer details over a tall multi-row latency chart that grows to fill the space, over the log tail. The local-node and peer-details panes share a fixed height so their borders line up exactly. Subnet routers show an `[e] N advertised routes` hint. Borders stay sharp and flush at any terminal size
 - **Operator setup (`O`)** — if Tailscale reports `checkprefs access denied`, press `O` to drop to the terminal and run `sudo tailscale set --operator=$USER` (password prompt and all), then the TUI restores itself and refreshes
 - Three-pane responsive layout (local dashboard, peer list, details) that resizes with the terminal
@@ -69,7 +70,6 @@ Working today:
 
 Still mocked / not yet implemented:
 
-- Account switching (`l`) still uses sample data (the log seed is a couple of sample lines, then real events take over)
 - Node actions: SSH (`s`) and ping-as-action (`p`)
 - Local-node self-latency (no meaningful self-RTT; the dashboard shows *exit-node* latency instead, and the live graph is always the selected *peer's*)
 
@@ -95,6 +95,7 @@ go run .
 | `x` / `t` | Toggle the highlighted peer as the active exit node — runs `tailscale set --exit-node` (exit-capable only) |
 | `e` | Expand a subnet router's advertised routes (overlay) |
 | `v` | Open/close the full event-log overlay (`j/k` scroll) |
+| `l` | Account management (live) — inside: `Enter` switch, `a` add (login), `d` remove, `l` logout |
 | `O` | Operator setup — runs `sudo tailscale set --operator=$USER` interactively |
 | `?` | Open/close the help overlay |
 | `esc` | Close the active overlay |
@@ -158,5 +159,5 @@ design-spec.md         authoritative UI/UX specification
 - [x] Phase 11.5 — log level syntax highlighting (color-coded levels, dimmed timestamps)
 - [x] Phase 12 — interactive connection toggle (`c`, `tailscale up`/`down`) + footer UX polish
 - [x] Phase 13 — fzf-style search (Input/Normal modes, `Ctrl+j/k` nav), cursor-clamp crash fix, dynamic footer
+- [x] Phase 14 — live account management (`tailscale switch`/`login`/`logout`) wired into the `[l]` modal
 - [ ] Remaining node actions (SSH, ping-as-action)
-- [ ] Live account switching (`tailscale switch`)

@@ -180,23 +180,42 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// Other keys (j/k, arrows, page) scroll the log viewport.
 	case stateAccounts:
-		// The accounts modal owns all keys: navigate the cursor and switch the
-		// active session; nothing falls through to the background or a viewport.
+		// The accounts modal owns all keys: navigate the cursor and run the live
+		// profile commands; nothing falls through to the background or a viewport.
 		switch key {
 		case "j", "down":
 			if m.accountCursor < len(m.accounts)-1 {
 				m.accountCursor++
 			}
+			m.overlay.SetContent(m.accountsBody(m.overlay.Width))
+			return m, nil
 		case "k", "up":
 			if m.accountCursor > 0 {
 				m.accountCursor--
 			}
+			m.overlay.SetContent(m.accountsBody(m.overlay.Width))
+			return m, nil
 		case "enter":
-			for i := range m.accounts {
-				m.accounts[i].Active = i == m.accountCursor
+			// Switch to the highlighted profile (if not already active), close the
+			// modal, and let the action refresh status + accounts.
+			if a, ok := m.selectedAccount(); ok && !a.Active {
+				m.state = stateMain
+				return m, switchAccountCmd(a.ID, a.Email)
 			}
+			return m, nil
+		case "a":
+			// Add account: interactive `tailscale login` (suspends the TUI).
+			return m, addAccountCmd()
+		case "d":
+			// Remove the highlighted profile (won't forget the active one).
+			if a, ok := m.selectedAccount(); ok && !a.Active {
+				return m, removeAccountCmd(a.ID, a.Email)
+			}
+			return m, nil
+		case "l":
+			// Log the current session out.
+			return m, logoutCmd()
 		}
-		m.overlay.SetContent(m.accountsBody(m.overlay.Width))
 		return m, nil
 	}
 
@@ -512,6 +531,9 @@ func padCol(s string, width int) string {
 // active) two-line block, then a divider and a two-column action grid.
 func (m Model) accountsBody(w int) string {
 	var lines []string
+	if len(m.accounts) == 0 {
+		lines = append(lines, modalLine(w, styles.ModalDim.Render("No accounts. Press [a] to add one.")), modalLine(w, ""))
+	}
 	for i, acc := range m.accounts {
 		lines = append(lines, m.accountRows(acc, i, w)...)
 		lines = append(lines, modalLine(w, ""))
