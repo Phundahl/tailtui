@@ -119,6 +119,28 @@ func currentUser() string {
 	return ""
 }
 
+// connectDoneMsg is delivered after the interactive connect/disconnect command
+// finishes and the TUI has been restored.
+type connectDoneMsg struct {
+	up  bool
+	err error
+}
+
+// connectCmd suspends the TUI and runs `tailscale up` (up==true) or `tailscale
+// down`, handing the terminal over (via tea.ExecProcess) so that an auth URL
+// printed by `up` is visible and interactive. No sudo — the user is already a
+// configured operator. The result returns as connectDoneMsg once restored.
+func connectCmd(up bool) tea.Cmd {
+	name := "down"
+	if up {
+		name = "up"
+	}
+	c := exec.Command("tailscale", name)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return connectDoneMsg{up: up, err: err}
+	})
+}
+
 // operatorSetupCmd suspends the TUI and hands the terminal to an interactive
 // `sudo tailscale set --operator=$USER`, so the user can type their password.
 // tea.ExecProcess releases the terminal before running and restores it after;

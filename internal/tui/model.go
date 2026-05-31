@@ -45,9 +45,15 @@ type Model struct {
 	overlay viewport.Model
 
 	// Domain state.
-	local types.LocalStatus
-	peers list.Model // the peer list; its highlighted item drives the details pane
-	logs  []types.LogEntry
+	local    types.LocalStatus
+	peers    list.Model   // the peer list; its highlighted item drives the details pane
+	allPeers []types.Peer // full sorted set; the source of truth for filtering
+	logs     []types.LogEntry
+
+	// Search/filter state (custom, not bubbles/list's built-in filter — see
+	// search.go). searchFocused == Input Mode; searchQuery == applied filter.
+	searchQuery   string
+	searchFocused bool
 
 	// Accounts modal state.
 	accounts      []types.Account

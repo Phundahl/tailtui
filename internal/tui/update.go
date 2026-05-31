@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Phundahl/tailscaleTUI/internal/types"
@@ -66,8 +65,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.appendLog("INFO", "operator set to "+currentUser()+"; refreshing"), fetchStatusCmd()
 
+	case connectDoneMsg:
+		// `tailscale up`/`down` finished and the TUI is restored; log + refresh so
+		// the new state (and any auth completion) reflects immediately.
+		action := "tailscale down"
+		if msg.up {
+			action = "tailscale up"
+		}
+		if msg.err != nil {
+			return m.appendLog("ERROR", action+": "+msg.err.Error()), nil
+		}
+		return m.appendLog("INFO", action+" succeeded; refreshing"), fetchStatusCmd()
+
 	case tea.KeyMsg:
-		// ctrl+c always quits, even mid-filter or with an overlay open.
+		// ctrl+c always quits, even mid-search or with an overlay open.
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
@@ -76,38 +87,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state != stateMain {
 			return m.updateOverlay(msg)
 		}
-		// While typing into the filter, all other keys are literal text — don't
-		// treat command keys as commands.
-		if m.peers.FilterState() != list.Filtering {
-			switch msg.String() {
-			case "q":
-				return m, tea.Quit
-			case "?":
-				return m.openHelp(), nil
-			case "e":
-				if p, ok := m.selectedPeer(); ok && len(p.AdvertisedRoutes) > 0 {
-					return m.openRoutes(p), nil
-				}
-				return m, nil
-			case "l":
-				return m.openAccounts(), nil
-			case "v":
-				return m.openLogs(), nil
-			case "O":
-				// Suspend the TUI and run the interactive sudo operator setup.
-				return m, operatorSetupCmd()
-			case "x", "t":
-				return m.toggleExitNode()
-			case "up", "k":
-				// Wrap to the bottom only when already at the top; otherwise
-				// fall through and let the list move/paginate normally.
-				if nm, ok := m.wrapNav(-1); ok {
-					return nm, nil
-				}
-			case "down", "j":
-				if nm, ok := m.wrapNav(+1); ok {
-					return nm, nil
-				}
+		// Input Mode: the search box is focused — keys edit the query or navigate
+		// the filtered list, and never trigger commands or reach the list keymap.
+		if m.searchFocused {
+			return m.updateSearchInput(msg)
+		}
+		// Normal Mode commands.
+		switch msg.String() {
+		case "/":
+			m.searchFocused = true // enter Input Mode, keep any existing query
+			return m, nil
+		case "esc":
+			// In Normal Mode, Esc clears an applied filter (full list); otherwise
+			// it's a no-op.
+			if m.searchQuery != "" {
+				m.clearSearch()
+			}
+			return m, nil
+		case "q":
+			return m, tea.Quit
+		case "?":
+			return m.openHelp(), nil
+		case "e":
+			if p, ok := m.selectedPeer(); ok && len(p.AdvertisedRoutes) > 0 {
+				return m.openRoutes(p), nil
+			}
+			return m, nil
+		case "l":
+			return m.openAccounts(), nil
+		case "v":
+			return m.openLogs(), nil
+		case "O":
+			// Suspend the TUI and run the interactive sudo operator setup.
+			return m, operatorSetupCmd()
+		case "c":
+			// Toggle the tailnet connection: down if up, up if down. Runs
+			// interactively so an auth URL from `up` is visible.
+			return m, connectCmd(!m.localConnected())
+		case "x", "t":
+			return m.toggleExitNode()
+		case "up", "k":
+			// Wrap to the bottom only when already at the top; otherwise
+			// fall through and let the list move/paginate normally.
+			if nm, ok := m.wrapNav(-1); ok {
+				return nm, nil
+			}
+		case "down", "j":
+			if nm, ok := m.wrapNav(+1); ok {
+				return nm, nil
 			}
 		}
 	}
@@ -118,12 +145,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// updateSearchInput handles keys while the search box is focused (Input Mode).
+// It consumes EVERY key so nothing reaches the command switch or the list keymap
+// while typing. Enter/Esc blur back to Normal Mode (keeping the filter); arrows
+// and Ctrl+j/k navigate the filtered list; a single printable rune types.
+func (m Model) updateSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter", "esc":
+		m.searchFocused = false // blur → Normal Mode, keep the filter applied
+		return m, nil
+	case "up", "ctrl+k":
+		m.searchNav(-1)
+		return m, nil
+	case "down", "ctrl+j":
+		m.searchNav(+1)
+		return m, nil
+	case "backspace":
+		m.backspaceSearch()
+		return m, nil
+	default:
+		// A single printable rune (incl. space) types into the query; named keys
+		// (tab, pgdown, …) are ignored so they can't corrupt the filter.
+		if s := msg.String(); len([]rune(s)) == 1 {
+			m.typeSearch(s)
+		}
+		return m, nil
+	}
+}
+
 // applyStatus folds a completed `tailscale status` fetch into the model. It
-// records any error (kept visible in the logs pane), refreshes the local node,
-// and rebuilds the peer list — preserving the highlighted node by hostname so a
-// background refresh doesn't yank the user's selection. The peer list is left
-// untouched while the user is actively typing a "/" filter, so a poll can't
-// disrupt filtering; the next tick reconciles it.
+// records any error (kept visible in the logs pane), refreshes the local node
+// and the full peer set, then rebuilds the (possibly filtered) visible list —
+// preserving the highlighted node by hostname, and always clamping the cursor so
+// a refresh can never leave it out of range.
 func (m Model) applyStatus(msg statusMsg) (tea.Model, tea.Cmd) {
 	prevErr := m.fetchErr
 	m.fetchErr = msg.err
@@ -139,22 +193,22 @@ func (m Model) applyStatus(msg statusMsg) (tea.Model, tea.Cmd) {
 		m = m.appendLog("INFO", "reconnected to tailscaled")
 	}
 	m.local = msg.local
-
-	if m.peers.FilterState() == list.Filtering {
-		return m, nil
-	}
+	m.allPeers = sortPeers(msg.peers)
 
 	prev, _ := m.selectedPeer()
-	cmd := m.peers.SetItems(peerItems(m.withLatency(msg.peers)))
+	m.peers.SetItems(m.filteredItems())
+
+	target := 0 // selection lost (filtered out / removed) → top
 	if prev.Hostname != "" {
 		for i, it := range m.peers.Items() {
 			if p, ok := it.(types.Peer); ok && p.Hostname == prev.Hostname {
-				m.peers.Select(i)
+				target = i
 				break
 			}
 		}
 	}
-	return m, cmd
+	m.selectClamped(target)
+	return m, nil
 }
 
 // withLatency overlays each peer's accumulated live ping history (keyed by
