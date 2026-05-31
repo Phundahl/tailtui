@@ -470,7 +470,7 @@ func helpBody(w int) string {
 	})...)
 	lines = append(lines, group("NODE ACTIONS", [][2]string{
 		{"Connect / Disconnect", "c"},
-		{"Toggle Exit Node", "x / t"},
+		{"Toggle Exit Node", "x"},
 		{"Expand Subnet Routes", "e"},
 		{"Operator Setup (sudo)", "O"},
 	})...)

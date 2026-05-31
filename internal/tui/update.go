@@ -148,7 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle the tailnet connection: down if up, up if down. Runs
 			// interactively so an auth URL from `up` is visible.
 			return m, connectCmd(!m.localConnected())
-		case "x", "t":
+		case "x":
 			return m.toggleExitNode()
 		case "up", "k":
 			// Wrap to the bottom only when already at the top; otherwise

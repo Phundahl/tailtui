@@ -179,9 +179,16 @@ func (m Model) renderFooter() string {
 		connect = "[c] Disconnect"
 		icon, status = styles.Online.Render("●"), styles.Dim.Render(" CONNECTED")
 	}
-	// In Input Mode, surface the otherwise-hidden search navigation shortcuts.
-	left := styles.Dim.Render("[j/k] Nav  [/] Search  " + connect + "  [x] Exit Node  [O] Operator  [v] Logs")
+	// "[x] Exit Node" is shown only when the highlighted peer actually offers
+	// exit-node service (the toggle is a no-op otherwise), matching the
+	// contextual-hint pattern used elsewhere.
+	exitHint := ""
+	if p, ok := m.selectedPeer(); ok && p.OffersExitNode {
+		exitHint = "  [x] Exit Node"
+	}
+	left := styles.Dim.Render("[j/k] Nav  [/] Search  " + connect + exitHint + "  [O] Operator  [v] Logs")
 	if m.searchFocused {
+		// In Input Mode, surface the otherwise-hidden search navigation shortcuts.
 		left = styles.Dim.Render("[↑↓ Ctrl+j/k] Nav   [Enter/Esc] Apply   type to filter")
 	}
 	// Version pinned to the far-right edge (Bar right-justifies this segment),
