@@ -92,7 +92,7 @@ with a [Nerd Font](https://www.nerdfonts.com/) for the node glyphs.
 | `/` | Search / fuzzy-filter. While typing: ↑↓ or `Ctrl+j`/`Ctrl+k` navigate |
 | `Enter` / `Esc` | Apply the filter (blur the box); `Esc` again clears it |
 | `c` | Connect / disconnect the local node (`tailscale up`/`down`) |
-| `x` / `t` | Toggle the highlighted peer as the active exit node |
+| `x` | Toggle the highlighted peer as the active exit node (exit-capable peers only) |
 | `e` | Expand a subnet router's advertised routes |
 | `v` | Open / close the full event-log overlay |
 | `l` | Account management — switch · add · remove · logout |
