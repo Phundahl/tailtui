@@ -6,6 +6,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,7 +25,12 @@ const (
 	stateHelp
 	stateRoutes
 	stateAccounts
+	stateLogs
 )
+
+// maxLogEntries caps the in-memory log ring (FIFO) so a long-running session
+// can't leak memory. Oldest entries are dropped once the cap is exceeded.
+const maxLogEntries = 500
 
 // Model is the root Bubble Tea model holding all UI state.
 type Model struct {
@@ -45,23 +52,37 @@ type Model struct {
 	// Accounts modal state.
 	accounts      []types.Account
 	accountCursor int
+
+	// fetchErr holds the last `tailscale status` failure (nil when healthy); it
+	// surfaces as an error line in the logs pane. The last good data stays on
+	// screen across a transient failure.
+	fetchErr error
+
+	// latency holds live ping history per node, keyed by Tailscale IP. The ping
+	// ticker measures the highlighted node; applyStatus re-injects these into
+	// the list items so accumulated samples survive a status refresh.
+	latency map[string][]int
 }
 
-// New constructs the initial model populated with mock data.
+// New constructs the initial model. Node data is empty until the first
+// `tailscale status` poll resolves (kicked off by Init); only the logs and
+// accounts panes remain mock-backed for now.
 func New() Model {
 	return Model{
 		state:    stateMain,
 		overlay:  viewport.New(0, 0), // sized when an overlay is opened
-		local:    mock.Local(),
-		peers:    newPeerList(mock.Peers()),
+		peers:    newPeerList(nil),
 		logs:     mock.Logs(),
 		accounts: mock.Accounts(),
+		latency:  make(map[string][]int),
 	}
 }
 
-// Init implements tea.Model. No initial command for the mock-data build.
+// Init implements tea.Model: fetch live status immediately and start both the
+// status-refresh ticker (node list) and the ping ticker (live latency for the
+// highlighted node).
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(fetchStatusCmd(), tickCmd(), pingTickCmd())
 }
 
 // selectedPeer returns the peer currently highlighted in the list, and false
@@ -81,4 +102,30 @@ func (m Model) activeExitNodeName() string {
 		}
 	}
 	return "None"
+}
+
+// activeExitNodeIP returns the Tailscale IP of the active exit node when one is
+// set and online (so it can be pinged for the "Exit Latency" readout), or "".
+func (m Model) activeExitNodeIP() string {
+	for _, item := range m.peers.Items() {
+		if p, ok := item.(types.Peer); ok && p.IsActiveExitNode && p.Online {
+			return p.TailscaleIP
+		}
+	}
+	return ""
+}
+
+// appendLog records a timestamped entry in the model's log ring, enforcing the
+// FIFO cap. It returns the updated model (value receiver), so callers fold the
+// result back into the Elm loop.
+func (m Model) appendLog(level, message string) Model {
+	m.logs = append(m.logs, types.LogEntry{
+		Time:    time.Now().Format("15:04:05"),
+		Level:   level,
+		Message: message,
+	})
+	if len(m.logs) > maxLogEntries {
+		m.logs = m.logs[len(m.logs)-maxLogEntries:]
+	}
+	return m
 }

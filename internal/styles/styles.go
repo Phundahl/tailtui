@@ -137,13 +137,24 @@ func Divider(width int) string {
 }
 
 // Bar renders a single-line status bar with left- and right-justified text
-// padded to the given width.
+// padded to the given width. The left segment is CLIPPED if the two segments
+// can't both fit, and the whole line is capped at width — so a long hint can
+// never overflow and wrap onto a second row (which would push the layout down
+// and scroll the top borders off the alt-screen).
 func Bar(width int, left, right string) string {
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	rw := lipgloss.Width(right)
+	if maxLeft := width - rw - 1; lipgloss.Width(left) > maxLeft {
+		if maxLeft < 0 {
+			maxLeft = 0
+		}
+		left = lipgloss.NewStyle().MaxWidth(maxLeft).Render(left)
+	}
+	gap := width - lipgloss.Width(left) - rw
 	if gap < 1 {
 		gap = 1
 	}
-	return left + strings.Repeat(" ", gap) + right
+	line := left + strings.Repeat(" ", gap) + right
+	return lipgloss.NewStyle().MaxWidth(width).Render(line) // final safety cap
 }
 
 // latencyBlocks maps a 0..7 bucket to an ascending vertical block glyph.
@@ -201,6 +212,84 @@ func LatencyGraphWidth(values []int, width int) string {
 		rs[i] = values[i*len(values)/width]
 	}
 	return LatencyGraph(rs)
+}
+
+// latencyColor maps an absolute latency (ms) to its bar style: faint accent for
+// low, solid accent for medium, bold warning for high, bold error for critical.
+func latencyColor(v int) lipgloss.Style {
+	switch {
+	case v >= 100:
+		return lipgloss.NewStyle().Foreground(Danger).Bold(true)
+	case v >= 60:
+		return lipgloss.NewStyle().Foreground(Warn).Bold(true)
+	case v >= 30:
+		return lipgloss.NewStyle().Foreground(Primary)
+	default:
+		return lipgloss.NewStyle().Foreground(Primary).Faint(true)
+	}
+}
+
+// LatencyGraphArea renders a multi-row vertical bar chart filling exactly width
+// columns × height rows. Bar HEIGHT is scaled to the series min/max (so the
+// shape reads at any range) using eighth-block glyphs for sub-row precision,
+// while each bar's COLOR encodes absolute latency (latencyColor) — the same
+// language as the single-row LatencyGraph, just taller to fill the pane.
+func LatencyGraphArea(values []int, width, height int) string {
+	if height < 1 {
+		height = 1
+	}
+	if width < 1 || len(values) == 0 {
+		return Dim.Render("no samples")
+	}
+	if height == 1 {
+		return LatencyGraphWidth(values, width)
+	}
+
+	// Resample to exactly width columns (nearest-neighbor).
+	cols := make([]int, width)
+	for i := range cols {
+		cols[i] = values[i*len(values)/width]
+	}
+	min, max := cols[0], cols[0]
+	for _, v := range cols {
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+	span := max - min
+	maxEighths := height * 8
+
+	var b strings.Builder
+	for row := 0; row < height; row++ {
+		fromBottom := height - 1 - row // 0 = bottom row
+		for _, v := range cols {
+			level := maxEighths
+			if span > 0 {
+				level = (v - min) * maxEighths / span
+			} else {
+				level = maxEighths / 2 // flat series: half-height bars
+			}
+			if level < 1 {
+				level = 1 // always show at least a sliver
+			}
+			full, rem := level/8, level%8
+			switch {
+			case fromBottom < full:
+				b.WriteString(latencyColor(v).Render("█"))
+			case fromBottom == full && rem > 0:
+				b.WriteString(latencyColor(v).Render(string(latencyBlocks[rem-1])))
+			default:
+				b.WriteByte(' ')
+			}
+		}
+		if row < height-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 // bars converts values to block runes scaled to the series min/max.
