@@ -2,11 +2,10 @@
 // `tailscale` CLI and maps `tailscale status --json` into the CLI-agnostic
 // domain models in internal/types.
 //
-// This is the layer that replaces internal/mock as the source of node data
-// (Phase 6). The wire structs below are private to this package — only
-// types.LocalStatus / types.Peer cross the boundary, so the rest of the app
-// never sees a Tailscale-specific shape. Latency is still synthesized (the real
-// ping/latency source is a later phase); see mock.SyntheticLatency.
+// This is the live source of node data (Phase 6). The wire structs below are
+// private to this package — only types.LocalStatus / types.Peer cross the
+// boundary, so the rest of the app never sees a Tailscale-specific shape. Live
+// latency is measured per selected peer via Ping (tailscale ping).
 package tailscale
 
 import (

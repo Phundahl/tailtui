@@ -21,7 +21,7 @@ const (
 	headerHeight = 1
 	footerHeight = 1
 	logsHeight   = 5  // TERMINAL_LOGS pane (border + tail lines)
-	localNodeH   = 11 // LOCAL_NODE pane height (border + fields + Connect)
+	localNodeH   = 10 // LOCAL_NODE pane height (border + fields + Connect)
 	minLatencyH  = 4  // LATENCY HISTORY pane never shrinks below this
 	gutter       = 1  // column gap between the left and right columns
 	minWidth     = 72
@@ -207,10 +207,9 @@ func (m Model) renderLocalNode(lay layout) string {
 		field("Host:", l.Hostname),
 		field("Local IP:", l.LocalIP),
 		field("Tailscale IP:", l.TailscaleIP),
-		styles.Label.Render("State:") + " " + connSymbol(l.Conn) + " " + styles.Value.Render(connText(l.Conn, l.Relay)),
+		styles.Label.Render("Exit State:") + " " + m.renderExitState(),
 		styles.Label.Render("Exit:") + " " + m.renderExitValue(),
 		styles.Label.Render("Exit Latency:") + " " + m.renderExitLatency(),
-		"",
 		m.renderConnectButton(cw),
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left, fields...)
@@ -262,6 +261,21 @@ func searchDisplay(q string, leftW int) string {
 	return q
 }
 
+// renderExitState shows the route state (DIRECT / RELAY) of the *active exit
+// node* connection — the peer all traffic is currently routed through. It looks
+// that peer up in the polled status (the list is the source of truth) and
+// reports its real reachability. When no exit node is active it shows a dim
+// "N/A", keeping the LOCAL_NODE layout static and consistent with the other
+// inactive readouts (Exit / Exit Latency).
+func (m Model) renderExitState() string {
+	for _, item := range m.peers.Items() {
+		if p, ok := item.(types.Peer); ok && p.IsActiveExitNode {
+			return connSymbol(p.Conn) + " " + styles.Value.Render(connText(p.Conn, p.Relay))
+		}
+	}
+	return styles.Dim.Render("N/A")
+}
+
 func (m Model) renderExitValue() string {
 	name := m.activeExitNodeName()
 	if name == "None" {
@@ -298,7 +312,6 @@ func (m Model) renderDetails(lay layout) string {
 		field("OS:", p.OS.Icon()+" "+p.OS.Name()),
 		field("IP:", p.TailscaleIP),
 		styles.Label.Render("Conn:") + " " + connSymbol(p.Conn) + " " + styles.Value.Render(connText(p.Conn, p.Relay)),
-		field("Version:", p.Version),
 		field("Tags:", tagList(p.Tags)),
 		field("Last Seen:", p.LastSeen),
 	}

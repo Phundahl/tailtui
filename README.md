@@ -12,7 +12,7 @@ terminal.
 ```
  tailTUI                                              (q)uit (?)help
 ┌─┤ LOCAL_NODE ├────────────┐ ┌─┤ PEER DETAILS: dc-subnet-01 ├───┐
-│ User / Host / IPs / State │ │ IDENTITY · OS · IP · Conn · Tags │
+│ User / Host / Exit State  │ │ IDENTITY · OS · IP · Conn · Tags │
 │ Exit / Exit Latency       │ │ [e] 12 advertised routes         │
 │      [c] Disconnect       │ └──────────────────────────────────┘
 └───────────────────────────┘ ┌─┤ LATENCY HISTORY ├──────────────┐
@@ -62,7 +62,10 @@ for the opposite workflow:
   inline.
 - **Exit nodes & subnet routes at a glance.** One-key exit-node toggling (`x`),
   advertised-route inspection (`e`), and a priority-sorted node list (exit
-  nodes → subnet routers → online → offline).
+  nodes → subnet routers → online → offline). The LOCAL_NODE panel's **Exit
+  State** reads the real-time route status — `DIRECT` or `RELAY` — of the
+  *active* exit node connection (the peer all traffic is routed through), or
+  `N/A` when no exit node is active.
 
 ## Installation
 

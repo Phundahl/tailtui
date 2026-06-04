@@ -84,7 +84,6 @@ type Peer struct {
 	TailscaleIP string
 	Conn        ConnType
 	Relay       string // DERP region, when Conn == ConnRelay
-	Version     string
 	Tags        []string
 	LastSeen    string
 	Online      bool

@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/Phundahl/tailtui/internal/mock"
 	"github.com/Phundahl/tailtui/internal/types"
 )
 
@@ -71,15 +70,15 @@ type Model struct {
 }
 
 // New constructs the initial model. Node data is empty until the first
-// `tailscale status` poll resolves (kicked off by Init); only the logs and
-// accounts panes remain mock-backed for now.
+// `tailscale status` poll resolves (kicked off by Init); the log ring starts
+// empty and fills with real runtime events, and accounts are fetched live.
 func New() Model {
 	return Model{
 		state:   stateMain,
 		overlay: viewport.New(0, 0), // sized when an overlay is opened
 		peers:   newPeerList(nil),
-		logs:    mock.Logs(),
 		latency: make(map[string][]int),
+		// logs start empty (no mock seed); real events populate the ring.
 		// accounts are fetched live (tailscale switch --list) by Init / on open.
 	}
 }
