@@ -1,8 +1,7 @@
-<div align="center">
-  <img src="assets/logo.png" alt="tailTUI Logo" width="350" />
-  <br/>
-  <p><i>A brutalist, keyboard-centric terminal user interface for Tailscale.</i></p>
-</div>
+<img src="assets/logo.png" alt="tailTUI Logo" width="150" />
+
+# tailTUI
+*A brutalist, keyboard-centric terminal user interface for Tailscale.*
 
 `tailTUI` is a fast, dense, single-screen control panel for your tailnet. It
 wraps the `tailscale` CLI in a sharp, no-nonsense TUI built on the
