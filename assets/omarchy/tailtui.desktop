@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Name=tailTUI
+Comment=Terminal UI for Tailscale
+Icon=tailtui-icon
+Exec=alacritty -e tailtui
+Terminal=false
+Type=Application
+Categories=Network;System;Utility;
