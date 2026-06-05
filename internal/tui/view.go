@@ -13,7 +13,7 @@ import (
 // Branding shown in the UI chrome.
 const (
 	appName    = "tailTUI"
-	appVersion = "v1.0.0"
+	appVersion = "v1.1.0"
 )
 
 // Fixed layout constants.
@@ -21,7 +21,7 @@ const (
 	headerHeight = 1
 	footerHeight = 1
 	logsHeight   = 5  // TERMINAL_LOGS pane (border + tail lines)
-	localNodeH   = 10 // LOCAL_NODE pane height (border + fields + Connect)
+	localNodeH   = 11 // LOCAL_NODE pane height (border + fields + Connect + grouped Settings/Routing)
 	minLatencyH  = 4  // LATENCY HISTORY pane never shrinks below this
 	gutter       = 1  // column gap between the left and right columns
 	minWidth     = 72
@@ -211,6 +211,7 @@ func (m Model) renderLocalNode(lay layout) string {
 		styles.Label.Render("Exit:") + " " + m.renderExitValue(),
 		styles.Label.Render("Exit Latency:") + " " + m.renderExitLatency(),
 		m.renderConnectButton(cw),
+		m.renderActionButtons(cw),
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left, fields...)
 	return styles.Pane("LOCAL_NODE", body, lay.leftW, lay.localH, false)
@@ -232,6 +233,18 @@ func (m Model) renderConnectButton(cw int) string {
 		st = lipgloss.NewStyle().Foreground(styles.Warn).Bold(true)
 	}
 	return lipgloss.PlaceHorizontal(cw, lipgloss.Center, st.Render(label))
+}
+
+// renderActionButtons renders the modal-trigger actions — "[S] Advanced
+// Settings" and "[R] Routing" — on a single centered line, grouped horizontally
+// with spacing between them. [S] (shift+s) opens the settings modal and [R]
+// (shift+r) the routing modal; the lowercase keys remain reserved. Keeping both
+// on one row keeps the LOCAL_NODE pane from looking bottom-heavy.
+func (m Model) renderActionButtons(cw int) string {
+	row := styles.Button.Render("[S] Advanced Settings") +
+		styles.Value.Render("    ") +
+		styles.Button.Render("[R] Routing")
+	return lipgloss.PlaceHorizontal(cw, lipgloss.Center, row)
 }
 
 func (m Model) renderNodes(lay layout) string {

@@ -77,6 +77,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.appendLog("INFO", action+" succeeded; refreshing"), fetchStatusCmd()
 
+	case prefsMsg:
+		// Live local-node preferences arrived; store them so the Advanced Settings
+		// checkboxes (rendered from m.prefs each frame) reflect reality. Keep the
+		// last good prefs on error.
+		if msg.err != nil {
+			return m.appendLog("ERROR", "read prefs: "+msg.err.Error()), nil
+		}
+		m.prefs = msg.prefs
+		// If the routing modal is open but the user hasn't edited the working copy
+		// yet (and isn't mid-CIDR-entry), refresh that copy from the latest daemon
+		// read so it shows current data; once dirtied, local edits are preserved.
+		if m.state == stateRouting && !m.routingDirty && !m.routingInputMode {
+			m.routingExitNode = m.prefs.AdvertiseExitNode
+			m.routingRoutes = append([]string(nil), m.prefs.AdvertiseRoutes...)
+			if m.routingCursor >= m.routingItemCount() {
+				m.routingCursor = 0
+			}
+			m.refreshRoutingOverlay()
+		}
+		return m, nil
+
+	case prefActionMsg:
+		// A `tailscale set --<flag>` toggle finished; log it and re-fetch prefs so
+		// the checkbox reconciles with the daemon (reverting a failed optimistic
+		// flip on the way back).
+		if msg.err != nil {
+			return m.appendLog("ERROR", msg.desc+": "+msg.err.Error()), fetchPrefsCmd()
+		}
+		return m.appendLog("INFO", msg.desc), fetchPrefsCmd()
+
+	case routingActionMsg:
+		// The `tailscale set --advertise-…` command finished; log the executed
+		// command and refresh status + prefs so the new advertised state shows.
+		if msg.err != nil {
+			return m.appendLog("ERROR", "apply routing: "+msg.err.Error()), tea.Batch(fetchStatusCmd(), fetchPrefsCmd())
+		}
+		return m.appendLog("INFO", "applied: "+msg.desc), tea.Batch(fetchStatusCmd(), fetchPrefsCmd())
+
+	case clipboardMsg:
+		// Copy-to-clipboard finished; flash "Copied!" in the Command Room (or log
+		// the failure when no clipboard tool is available).
+		if msg.err != nil {
+			return m.appendLog("ERROR", "clipboard: "+msg.err.Error()), nil
+		}
+		m.routingCopied = true
+		return m.appendLog("INFO", "routing command copied to clipboard"), nil
+
 	case accountsMsg:
 		// Live profile list arrived; refresh the model and re-render the modal if
 		// it's open. Keep the last good list on error.
@@ -141,6 +188,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.openAccounts(), fetchAccountsCmd()
 		case "v":
 			return m.openLogs(), nil
+		case "S":
+			// Open the Advanced Settings modal (uppercase S / shift+s) and refresh
+			// the live prefs.
+			return m.openSettings(), fetchPrefsCmd()
+		case "s":
+			// Lowercase `s` is intentionally reserved for the future SSH-as-action
+			// feature; ignore it for now so it never reaches the list keymap.
+			return m, nil
+		case "R":
+			// Open the Routing Management modal (uppercase R / shift+r) and refresh
+			// the live prefs so the advertised routes are current.
+			return m.openRouting(), fetchPrefsCmd()
+		case "r":
+			// Lowercase `r` is reserved for a future routing-related action; ignore
+			// it for now so it never reaches the list keymap.
+			return m, nil
 		case "O":
 			// Suspend the TUI and run the interactive sudo operator setup.
 			return m, operatorSetupCmd()
