@@ -132,6 +132,11 @@ func (m Model) openLogs() Model {
 // resizeOverlay re-sizes and re-renders the active overlay after a window
 // resize, so the modal tracks the terminal dimensions.
 func (m Model) resizeOverlay() Model {
+	if m.state == stateSettings || m.state == stateRoutingConfirm {
+		// Rendered straight from model state each frame via overlayCenter, so a
+		// resize needs no precomputed viewport content.
+		return m
+	}
 	w := overlayWidth(m.width)
 	var content string
 	switch m.state {
@@ -143,6 +148,9 @@ func (m Model) resizeOverlay() Model {
 		}
 	case stateAccounts:
 		content = m.accountsBody(w)
+	case stateRouting:
+		m.routingInput.Width = clampInputWidth(w)
+		content = m.routingBody(w)
 	case stateLogs:
 		lw := logOverlayWidth(m.width) // wider than the other modals
 		content = logBody(m.logs, lw)
@@ -162,6 +170,16 @@ func (m Model) resizeOverlay() Model {
 // keys) are forwarded ONLY to the overlay viewport — never the background list.
 func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	// The routing CIDR editor owns ALL keys (incl. esc/q) so the global close
+	// handler can't interrupt an in-progress entry.
+	if m.state == stateRouting && m.routingInputMode {
+		return m.updateRoutingInput(msg)
+	}
+	// The Command Room confirmation owns its keys too: Esc goes BACK to the list
+	// (not all the way to the main view), so it can't fall through to the close.
+	if m.state == stateRoutingConfirm {
+		return m.updateRoutingConfirm(msg)
+	}
 	if key == "esc" || key == "q" {
 		m.state = stateMain
 		return m, nil
@@ -217,6 +235,38 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, logoutCmd()
 		}
 		return m, nil
+	case stateSettings:
+		// The Advanced Settings modal owns all keys: navigate the toggle list and
+		// fire the `tailscale set` command; nothing falls through to the background.
+		switch key {
+		case "j", "down":
+			if m.settingCursor < len(settingDefs)-1 {
+				m.settingCursor++
+			}
+			return m, nil
+		case "k", "up":
+			if m.settingCursor > 0 {
+				m.settingCursor--
+			}
+			return m, nil
+		case " ", "space":
+			// Toggle the highlighted setting: flip it optimistically (instant
+			// checkbox feedback) and issue the real `tailscale set` off the UI
+			// thread. The prefActionMsg re-fetches prefs to reconcile.
+			if m.settingCursor >= 0 && m.settingCursor < len(settingDefs) {
+				d := settingDefs[m.settingCursor]
+				nv := !d.get(m.prefs)
+				m.prefs = d.set(m.prefs, nv)
+				return m, setPrefCmd(d.flag, nv, d.label)
+			}
+			return m, nil
+		}
+		return m, nil
+	case stateRouting:
+		// List (navigation) mode: j/k navigate, Space toggles exit-node advertise,
+		// [a] adds a route (input mode), [d] removes one. All edits are local.
+		// Esc/q (handled above) close it.
+		return m.updateRoutingList(key)
 	}
 
 	// Help / routes: forward scroll keys to the viewport.
@@ -237,14 +287,27 @@ func (m Model) renderOverlay(base string) string {
 	if m.state == stateLogs {
 		return m.renderLogOverlay(base)
 	}
+	// The settings modal is a custom two-box (master/detail) layout rendered
+	// directly from model state, not the shared viewport.
+	if m.state == stateSettings {
+		return m.renderSettingsOverlay(base)
+	}
+	// The routing confirmation ("Command Room") is also rendered directly.
+	if m.state == stateRoutingConfirm {
+		return m.renderRoutingConfirmOverlay(base)
+	}
 
 	w := m.overlay.Width
 
+	// The "-- KEYBOARD INPUT MODE ACTIVE --" banner is reserved for an ACTIVE
+	// inline text-input state (only the routing CIDR editor today); read-only /
+	// navigation overlays show a plain close hint instead, so the banner never
+	// appears in Help, Accounts, or the routing list.
 	var title, hint string
 	switch m.state {
 	case stateHelp:
 		title = "HELP & SHORTCUTS"
-		hint = "-- KEYBOARD INPUT MODE ACTIVE --"
+		hint = "[Esc] Close"
 	case stateRoutes:
 		name := ""
 		if p, ok := m.selectedPeer(); ok {
@@ -254,7 +317,14 @@ func (m Model) renderOverlay(base string) string {
 		hint = "[Esc] Back to List"
 	case stateAccounts:
 		title = "ACCOUNT_MANAGEMENT"
-		hint = "-- KEYBOARD INPUT MODE ACTIVE --"
+		hint = "[Esc] Close"
+	case stateRouting:
+		title = "ROUTING_MANAGEMENT"
+		if m.routingInputMode {
+			hint = "-- KEYBOARD INPUT MODE ACTIVE --"
+		} else {
+			hint = "[Esc] Close"
+		}
 	}
 
 	// Title rendered as a tab "⌐ TITLE ¬", matching the mockups.
@@ -338,15 +408,154 @@ func (m Model) renderLogOverlay(base string) string {
 // modalTitledTop renders an opaque "┌─┤ TITLE ├────┐" top border exactly innerW
 // cells wide (the span between the corner glyphs), Surface-backed throughout.
 func modalTitledTop(title string, innerW int) string {
-	border := lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.Surface)
+	return modalTitledTopColor(title, innerW, styles.Primary)
+}
+
+// modalTitledTopColor is modalTitledTop with a caller-chosen border/title color,
+// so master/detail boxes can show focus (Primary) vs unfocused (BorderInactive)
+// — matching the "border = focus" invariant on the base panes.
+func modalTitledTopColor(title string, innerW int, bcol lipgloss.Color) string {
+	border := lipgloss.NewStyle().Foreground(bcol).Background(styles.Surface)
+	titleStyle := lipgloss.NewStyle().Foreground(bcol).Background(styles.Surface).Bold(true)
 	const lead, trail = "─┤ ", " ├"
 	used := lipgloss.Width(lead) + lipgloss.Width(title) + lipgloss.Width(trail)
 	if dashes := innerW - used; dashes >= 0 {
 		return border.Render("┌"+lead) +
-			styles.ModalTitle.Render(title) +
+			titleStyle.Render(title) +
 			border.Render(trail+strings.Repeat("─", dashes)+"┐")
 	}
 	return border.Render("┌" + strings.Repeat("─", innerW) + "┐")
+}
+
+// modalBox frames content as an opaque, Surface-filled box with a titled top
+// border (┌─┤ TITLE ├──┐), exactly innerW+2 cells wide and len(content)+2 rows
+// tall. Each content line is surface-filled to innerW so nothing behind the
+// modal bleeds through. focused selects the border color (Primary vs dim).
+func modalBox(title string, content []string, innerW int, focused bool) []string {
+	bcol := styles.BorderInactive
+	if focused {
+		bcol = styles.Primary
+	}
+	side := lipgloss.NewStyle().Foreground(bcol).Background(styles.Surface).Render("│")
+	// Width pads short lines; MaxWidth clips an over-long one so the box stays
+	// exactly innerW+2 cells and can never wrap and break the flush overlay.
+	fill := lipgloss.NewStyle().Width(innerW).MaxWidth(innerW).Background(styles.Surface)
+	out := []string{modalTitledTopColor(title, innerW, bcol)}
+	for _, ln := range content {
+		out = append(out, side+fill.Render(ln)+side)
+	}
+	bottom := lipgloss.NewStyle().Foreground(bcol).Background(styles.Surface).
+		Render("└" + strings.Repeat("─", innerW) + "┘")
+	return append(out, bottom)
+}
+
+// wrapText word-wraps plain ASCII text to at most w cells per line (greedy).
+func wrapText(s string, w int) []string {
+	if w < 1 {
+		w = 1
+	}
+	var lines []string
+	cur := ""
+	for _, word := range strings.Fields(s) {
+		switch {
+		case cur == "":
+			cur = word
+		case len(cur)+1+len(word) <= w:
+			cur += " " + word
+		default:
+			lines = append(lines, cur)
+			cur = word
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
+}
+
+// renderSettingsOverlay draws the Advanced Settings modal as a true floating
+// master/detail overlay composited over the still-visible base view. Two opaque
+// side-by-side boxes — ADVANCED_SETTINGS (the focused toggle list, Primary
+// border) and DESCRIPTION (the help/CLI text for the highlighted toggle, dim
+// border) — sit above a surface-filled hint strip. Everything is rendered from
+// m.prefs / m.settingCursor, so toggling re-renders instantly.
+func (m Model) renderSettingsOverlay(base string) string {
+	const gap = 1
+	// Size the boxes to the terminal: a fixed toggle list (wide enough for the
+	// longest label), the description taking the remainder, capped so the modal
+	// stays compact and centered.
+	leftInner := 28
+	maxTotal := m.width - 4
+	if maxTotal > 96 {
+		maxTotal = 96
+	}
+	rightInner := maxTotal - (leftInner + 2) - gap - 2
+	if rightInner < 24 {
+		rightInner = 24
+	}
+
+	// Left box: the five toggles, with a leading cursor pointer and a colored
+	// checkbox ([x] green when enabled, [ ] dim when disabled).
+	left := []string{""}
+	for i, d := range settingDefs {
+		ptr := styles.ModalText.Render("  ")
+		if i == m.settingCursor {
+			ptr = styles.ModalKey.Render("❯ ")
+		}
+		chk, cs := "[ ]", styles.ModalDim
+		if d.get(m.prefs) {
+			chk, cs = "[x]", styles.StatusOK
+		}
+		left = append(left, " "+ptr+cs.Render(chk)+styles.ModalText.Render(" "+d.label))
+	}
+	left = append(left, "")
+
+	// Right box: description + the underlying CLI command for the toggle's next
+	// state (what pressing Space will run).
+	d := settingDefs[m.settingCursor]
+	right := []string{""}
+	for _, ln := range wrapText(d.desc, rightInner-2) {
+		right = append(right, " "+styles.ModalText.Render(ln))
+	}
+	nv := !d.get(m.prefs)
+	right = append(right,
+		"",
+		" "+styles.ModalHeading.Render("ON TOGGLE:"),
+		" "+styles.ModalAccent.Render("$ tailscale set"),
+		" "+styles.ModalKey.Render(fmt.Sprintf("--%s=%t", d.flag, nv)),
+	)
+
+	// Pad both content blocks to equal height so the boxes line up.
+	h := len(left)
+	if len(right) > h {
+		h = len(right)
+	}
+	for len(left) < h {
+		left = append(left, "")
+	}
+	for len(right) < h {
+		right = append(right, "")
+	}
+
+	leftBox := modalBox("ADVANCED_SETTINGS", left, leftInner, true)
+	rightBox := modalBox("DESCRIPTION", right, rightInner, false)
+
+	gapCell := styles.ModalFill(gap).Render("")
+	totalW := (leftInner + 2) + gap + (rightInner + 2)
+
+	var lines []string
+	for i := range leftBox {
+		lines = append(lines, leftBox[i]+gapCell+rightBox[i])
+	}
+	// Surface-filled hint strip below the two boxes.
+	hint := styles.ModalDim.Render("[j/k] Navigate    [Space] Toggle    [Esc] Close")
+	lines = append(lines,
+		modalLine(totalW, ""),
+		modalLine(totalW, lipgloss.PlaceHorizontal(totalW, lipgloss.Center, hint,
+			lipgloss.WithWhitespaceBackground(styles.Surface))),
+	)
+
+	return overlayCenter(base, strings.Join(lines, "\n"))
 }
 
 // logBody renders the full log ring for the overlay, one opaque line per entry.
@@ -476,6 +685,8 @@ func helpBody(w int) string {
 	})...)
 	lines = append(lines, group("GLOBAL", [][2]string{
 		{"Switch Accounts", "l"},
+		{"Advanced Settings", "S"},
+		{"Routing Management", "R"},
 		{"View Logs", "v"},
 		{"Toggle Help Overlay", "?"},
 		{"Quit Application", "q"},

@@ -154,6 +154,25 @@ type LocalStatus struct {
 	LatencyHistory []int
 }
 
+// Prefs holds the local-node Tailscale preferences exposed in the Advanced
+// Settings modal. Each field maps to a single `tailscale set --<flag>` toggle
+// and is read live from the daemon (see tailscale.GetPrefs). The struct is
+// CLI-agnostic — the adapter maps the wire prefs (RouteAll/CorpDNS/…) onto it.
+type Prefs struct {
+	AcceptRoutes           bool // --accept-routes        (wire: RouteAll)
+	ExitNodeAllowLANAccess bool // --exit-node-allow-lan-access
+	RunSSH                 bool // --ssh                  (wire: RunSSH)
+	AcceptDNS              bool // --accept-dns           (wire: CorpDNS)
+	ShieldsUp              bool // --shields-up           (wire: ShieldsUp)
+
+	// Routing management (Phase 21), read from the wire AdvertiseRoutes list:
+	// AdvertiseExitNode is true when the node advertises the exit-node default
+	// routes (0.0.0.0/0 + ::/0); AdvertiseRoutes holds the remaining subnet CIDRs
+	// this node advertises (those defaults stripped out).
+	AdvertiseExitNode bool
+	AdvertiseRoutes   []string
+}
+
 // Account is a Tailscale login the user can switch between (accounts modal).
 type Account struct {
 	ID     string // profile ID from `tailscale switch --list` (used to switch/remove)

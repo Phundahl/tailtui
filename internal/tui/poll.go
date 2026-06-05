@@ -2,11 +2,13 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	osuser "os/user"
 	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Phundahl/tailtui/internal/tailscale"
@@ -101,6 +103,74 @@ func setExitNodeCmd(ip, desc string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		return actionMsg{desc: desc, err: tailscale.SetExitNode(ctx, ip)}
+	}
+}
+
+// prefsMsg carries the result of a `tailscale debug prefs` read back into the
+// loop to populate the Advanced Settings checkboxes. On error the last good
+// prefs stay on screen.
+type prefsMsg struct {
+	prefs types.Prefs
+	err   error
+}
+
+// fetchPrefsCmd reads the live local-node preferences off the UI thread.
+func fetchPrefsCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		prefs, err := tailscale.GetPrefs(ctx)
+		return prefsMsg{prefs: prefs, err: err}
+	}
+}
+
+// prefActionMsg carries the result of a single `tailscale set --<flag>` toggle
+// from the Advanced Settings modal. desc is logged; on completion the model
+// re-fetches prefs so the checkbox reconciles with the daemon's true state
+// (reverting an optimistic flip if the command failed).
+type prefActionMsg struct {
+	desc string
+	err  error
+}
+
+// setPrefCmd toggles one boolean preference off the UI thread, tagging the
+// outcome with desc for the log ring.
+func setPrefCmd(flag string, val bool, desc string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		return prefActionMsg{desc: fmt.Sprintf("%s = %t", desc, val), err: tailscale.SetPref(ctx, flag, val)}
+	}
+}
+
+// routingActionMsg carries the result of applying the routing modal's staged
+// state (`tailscale set --advertise-exit-node/--advertise-routes`). desc is the
+// executed command (for the log); on completion the model refreshes status +
+// prefs so the UI reflects the new advertised state.
+type routingActionMsg struct {
+	desc string
+	err  error
+}
+
+// setRoutingCmd applies the routing working copy off the UI thread.
+func setRoutingCmd(exitNode bool, routes []string) tea.Cmd {
+	desc := tailscale.AdvertiseCommandString(exitNode, routes)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return routingActionMsg{desc: desc, err: tailscale.SetRouting(ctx, exitNode, routes)}
+	}
+}
+
+// clipboardMsg carries the result of a copy-to-clipboard action.
+type clipboardMsg struct{ err error }
+
+// copyRoutingCmd copies text to the system clipboard off the UI thread (atotto/
+// clipboard shells out to the platform tool — pbcopy / wl-copy / xclip / clip),
+// so a missing tool surfaces as an error rather than blocking or crashing.
+func copyRoutingCmd(text string) tea.Cmd {
+	return func() tea.Msg {
+		return clipboardMsg{err: clipboard.WriteAll(text)}
 	}
 }
 

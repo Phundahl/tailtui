@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -25,6 +26,9 @@ const (
 	stateRoutes
 	stateAccounts
 	stateLogs
+	stateSettings
+	stateRouting
+	stateRoutingConfirm
 )
 
 // maxLogEntries caps the in-memory log ring (FIFO) so a long-running session
@@ -58,6 +62,37 @@ type Model struct {
 	accounts      []types.Account
 	accountCursor int
 
+	// Advanced Settings modal state. prefs holds the live local-node preferences
+	// (read via tailscale.GetPrefs); settingCursor is the highlighted toggle.
+	prefs         types.Prefs
+	settingCursor int
+
+	// Routing Management modal state. routingCursor is the highlighted item
+	// (0 = the exit-node toggle, 1.. = each advertised route).
+	//
+	// Phase 22 edits a LOCAL working copy — routingExitNode / routingRoutes —
+	// snapshotted from prefs when the modal opens, so toggles / adds / removes
+	// never touch the daemon's last-known truth (m.prefs). routingDirty marks the
+	// copy as user-edited so a late prefs poll doesn't clobber edits. routingInput
+	// is the CIDR text editor; routingInputMode swaps the modal into input mode;
+	// routingInputErr flashes an invalid-CIDR entry. (CLI execution is Phase 23.)
+	routingCursor    int
+	routingExitNode  bool
+	routingRoutes    []string
+	routingInput     textinput.Model
+	routingInputMode bool
+	routingDirty     bool
+	routingInputErr  bool
+
+	// lastDeletedRoute remembers the CIDR most recently removed with [d] so the
+	// next [a] (add) pre-fills the editor with it — a lightweight pseudo-undo /
+	// edit-a-typo affordance. Reset when the modal (re)opens.
+	lastDeletedRoute string
+
+	// routingCopied flashes a "Copied!" indicator in the Command Room confirmation
+	// overlay after the command is copied to the clipboard. Reset on entry/exit.
+	routingCopied bool
+
 	// fetchErr holds the last `tailscale status` failure (nil when healthy); it
 	// surfaces as an error line in the logs pane. The last good data stays on
 	// screen across a transient failure.
@@ -83,10 +118,10 @@ func New() Model {
 	}
 }
 
-// Init implements tea.Model: fetch live status + account profiles immediately,
-// and start the status-refresh and ping tickers.
+// Init implements tea.Model: fetch live status + account profiles + local prefs
+// immediately, and start the status-refresh and ping tickers.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(fetchStatusCmd(), fetchAccountsCmd(), tickCmd(), pingTickCmd())
+	return tea.Batch(fetchStatusCmd(), fetchAccountsCmd(), fetchPrefsCmd(), tickCmd(), pingTickCmd())
 }
 
 // selectedPeer returns the peer currently highlighted in the list, and false

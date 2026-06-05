@@ -126,6 +126,89 @@ func Ping(ctx context.Context, ip string) (int, error) {
 	return 0, fmt.Errorf("tailscale ping: no reply from %s", ip)
 }
 
+// prefsWire is the subset of `tailscale debug prefs` (a JSON dump of the
+// daemon's ipn.Prefs) that backs the Advanced Settings modal. Field names match
+// the wire JSON exactly; only types.Prefs crosses the package boundary.
+type prefsWire struct {
+	RouteAll               bool     // accept-routes
+	ExitNodeAllowLANAccess bool     // exit-node-allow-lan-access
+	CorpDNS                bool     // accept-dns (MagicDNS)
+	RunSSH                 bool     // ssh
+	ShieldsUp              bool     // shields-up
+	AdvertiseRoutes        []string // subnet CIDRs this node advertises (+ exit defaults)
+}
+
+// GetPrefs reads the live local-node preferences via `tailscale debug prefs`
+// and maps the wire shape onto the CLI-agnostic types.Prefs, so the Advanced
+// Settings checkboxes reflect the daemon's real state.
+func GetPrefs(ctx context.Context) (types.Prefs, error) {
+	out, err := exec.CommandContext(ctx, "tailscale", "debug", "prefs").Output()
+	if err != nil {
+		return types.Prefs{}, runError(err)
+	}
+	var w prefsWire
+	if err := json.Unmarshal(out, &w); err != nil {
+		return types.Prefs{}, fmt.Errorf("parsing prefs: %w", err)
+	}
+	// Split the advertised routes into the exit-node defaults (which signal
+	// --advertise-exit-node) and the real subnet CIDRs (advertisedRoutes drops
+	// 0.0.0.0/0 and ::/0).
+	exit := false
+	for _, r := range w.AdvertiseRoutes {
+		if r == "0.0.0.0/0" || r == "::/0" {
+			exit = true
+			break
+		}
+	}
+	return types.Prefs{
+		AcceptRoutes:           w.RouteAll,
+		ExitNodeAllowLANAccess: w.ExitNodeAllowLANAccess,
+		RunSSH:                 w.RunSSH,
+		AcceptDNS:              w.CorpDNS,
+		ShieldsUp:              w.ShieldsUp,
+		AdvertiseExitNode:      exit,
+		AdvertiseRoutes:        advertisedRoutes(w.AdvertiseRoutes),
+	}, nil
+}
+
+// SetPref toggles one boolean preference via `tailscale set --<flag>=<bool>`
+// (e.g. `--accept-routes=true`). The daemon applies it; the next GetPrefs poll
+// reconciles the model with the real state.
+func SetPref(ctx context.Context, flag string, val bool) error {
+	arg := fmt.Sprintf("--%s=%t", flag, val)
+	out, err := exec.CommandContext(ctx, "tailscale", "set", arg).CombinedOutput()
+	return cliError("tailscale set "+arg, out, err)
+}
+
+// AdvertiseArgs builds the argument vector (after the `tailscale` binary) that
+// applies the routing modal's desired state: it always sets both
+// --advertise-exit-node and --advertise-routes so the command expresses the full
+// intended state. An empty routes list yields `--advertise-routes=` (empty),
+// which clears any advertised subnet routes — the Tailscale-idiomatic way to
+// express "advertise nothing" rather than omitting the flag (omitting would
+// leave the daemon's current routes unchanged).
+func AdvertiseArgs(exitNode bool, routes []string) []string {
+	return []string{
+		"set",
+		fmt.Sprintf("--advertise-exit-node=%t", exitNode),
+		"--advertise-routes=" + strings.Join(routes, ","),
+	}
+}
+
+// AdvertiseCommandString renders the full, copy-pasteable command shown in the
+// "Command Room" confirmation overlay — exactly what SetRouting executes.
+func AdvertiseCommandString(exitNode bool, routes []string) string {
+	return "tailscale " + strings.Join(AdvertiseArgs(exitNode, routes), " ")
+}
+
+// SetRouting applies the advertised exit-node / subnet-route state via
+// `tailscale set --advertise-exit-node=<bool> --advertise-routes=<csv>`. The
+// change still requires approval in the Tailscale Admin Console to take effect.
+func SetRouting(ctx context.Context, exitNode bool, routes []string) error {
+	out, err := exec.CommandContext(ctx, "tailscale", AdvertiseArgs(exitNode, routes)...).CombinedOutput()
+	return cliError("tailscale set (routing)", out, err)
+}
+
 // SetExitNode runs `tailscale set --exit-node=<ip>`; an empty ip clears the exit
 // node. The daemon applies the change, which the next status poll reflects.
 func SetExitNode(ctx context.Context, ip string) error {
