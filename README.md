@@ -228,10 +228,10 @@ Smaller parked items: in-UI Tailscale SSH and ping-as-action.
 
 ## Acknowledgments
 
-This project was designed and directed by Patrick Hundahl, with AI-assisted code
+This project was designed and directed by Phundahl, with AI-assisted code
 generation (Claude / Gemini) used to rapidly prototype and build the Bubble Tea
 interface.
 
 ## License
 
-Released under the [MIT License](LICENSE). © 2026 Patrick Hundahl.
+Released under the [MIT License](LICENSE). © 2026 Phundahl.
