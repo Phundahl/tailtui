@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Phundahl/tailtui/internal/tailscale"
 	"github.com/Phundahl/tailtui/internal/types"
 )
 
@@ -61,6 +62,12 @@ type Model struct {
 	// Accounts modal state.
 	accounts      []types.Account
 	accountCursor int
+	// profilesLocked is set when `tailscale switch --list --json` returns the
+	// "profiles access denied" error — the profile store is root-owned and the
+	// session isn't elevated. The accounts modal renders a "run with sudo" hint
+	// instead of the (empty) list; the background poll suppresses the log entry
+	// so a non-elevated session doesn't flood the ring every refresh.
+	profilesLocked bool
 
 	// Advanced Settings modal state. prefs holds the live local-node preferences
 	// (read via tailscale.GetPrefs); settingCursor is the highlighted toggle.
@@ -107,12 +114,20 @@ type Model struct {
 // New constructs the initial model. Node data is empty until the first
 // `tailscale status` poll resolves (kicked off by Init); the log ring starts
 // empty and fills with real runtime events, and accounts are fetched live.
+//
+// In TAILTUI_MOCK=1 mode the per-IP latency map is pre-seeded from the mock
+// fixture so the LATENCY HISTORY pane isn't an empty box during the opening
+// seconds of a recording; live ping ticks then append on top of the seed.
 func New() Model {
+	latency := make(map[string][]int)
+	if tailscale.MockEnabled() {
+		latency = tailscale.MockLatencySeed()
+	}
 	return Model{
 		state:   stateMain,
 		overlay: viewport.New(0, 0), // sized when an overlay is opened
 		peers:   newPeerList(nil),
-		latency: make(map[string][]int),
+		latency: latency,
 		// logs start empty (no mock seed); real events populate the ring.
 		// accounts are fetched live (tailscale switch --list) by Init / on open.
 	}

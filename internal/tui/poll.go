@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	osuser "os/user"
+	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -180,6 +181,25 @@ type accountsMsg struct {
 	err      error
 }
 
+// accountsLockedMsg is returned by fetchAccountsCmd when the daemon reports
+// "profiles access denied" — the profile store is root-owned and we're running
+// unprivileged. It is intentionally a distinct message (not an accountsMsg with
+// an err) so the Update handler can mark the lock without routing through the
+// generic error-log path: a non-elevated session would otherwise spam the log
+// ring with the same error on every background refresh.
+type accountsLockedMsg struct{}
+
+// isProfilesAccessDenied recognizes the daemon's "Access denied: profiles
+// access denied" response (case-insensitive substring match), which surfaces
+// for every profile-store read or mutation from an unprivileged session.
+func isProfilesAccessDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "profiles access denied") || strings.Contains(s, "access denied")
+}
+
 // accountActionMsg carries the result of an account-mutating command (switch,
 // remove, logout, login). desc is logged; on completion the model refreshes the
 // account list and status so the UI reflects the new reality.
@@ -188,49 +208,95 @@ type accountActionMsg struct {
 	err  error
 }
 
-// fetchAccountsCmd lists the local profiles off the UI thread.
+// fetchAccountsCmd lists the local profiles off the UI thread. A
+// "profiles access denied" failure is folded into a distinct accountsLockedMsg
+// so the Update loop can flip the lock flag without logging — this command is
+// re-fired on every refresh and every account action, so a non-elevated
+// session would otherwise paper the log ring with the same line.
 func fetchAccountsCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		accounts, err := tailscale.Accounts(ctx)
+		if isProfilesAccessDenied(err) {
+			return accountsLockedMsg{}
+		}
 		return accountsMsg{accounts: accounts, err: err}
 	}
 }
 
-// switchAccountCmd switches the active profile (`tailscale switch <id>`).
+// switchAccountCmd switches the active profile interactively via
+// tea.ExecProcess. On Linux the profile store is root-owned, so switching
+// requires root (same constraint as login) — the daemon-operator role isn't
+// enough. Wrapping in sudo + handing the terminal over lets the password
+// prompt be visible/interactive; an inherited-credentials session just runs.
+// In mock mode the in-memory state is flipped synchronously so the demo
+// stays interactive without ever suspending the TUI.
 func switchAccountCmd(id, name string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		return accountActionMsg{desc: "switched account → " + name, err: tailscale.SwitchAccount(ctx, id)}
+	if tailscale.MockEnabled() {
+		return func() tea.Msg {
+			tailscale.MockSwitchAccount(id)
+			return accountActionMsg{desc: "switched account → " + name + " (mock)"}
+		}
 	}
-}
-
-// removeAccountCmd forgets a stored profile (`tailscale switch remove <id>`).
-func removeAccountCmd(id, name string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return accountActionMsg{desc: "removed account " + name, err: tailscale.RemoveAccount(ctx, id)}
-	}
-}
-
-// logoutCmd logs the current session out (`tailscale logout`).
-func logoutCmd() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		return accountActionMsg{desc: "logged out", err: tailscale.Logout(ctx)}
-	}
-}
-
-// addAccountCmd runs `tailscale login` interactively via tea.ExecProcess so the
-// user can complete the auth URL in the terminal, then refreshes on return.
-func addAccountCmd() tea.Cmd {
-	c := exec.Command("tailscale", "login")
+	c := exec.Command("sudo", "tailscale", "switch", id)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return accountActionMsg{desc: "added account (tailscale login)", err: err}
+		return accountActionMsg{desc: "switched account → " + name, err: err}
+	})
+}
+
+// removeAccountCmd forgets a stored profile interactively via tea.ExecProcess.
+// Removing a profile mutates the root-owned profile store (same constraint as
+// add / switch / login on Linux), so we wrap in sudo and hand the terminal
+// over for the password prompt; an inherited-credentials session just runs.
+// In mock mode the profile is dropped from the in-memory list synchronously.
+func removeAccountCmd(id, name string) tea.Cmd {
+	if tailscale.MockEnabled() {
+		return func() tea.Msg {
+			tailscale.MockRemoveAccount(id)
+			return accountActionMsg{desc: "removed account " + name + " (mock)"}
+		}
+	}
+	c := exec.Command("sudo", "tailscale", "switch", "remove", id)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return accountActionMsg{desc: "removed account " + name, err: err}
+	})
+}
+
+// logoutCmd logs the current session out interactively via tea.ExecProcess.
+// Logout clears the active profile in the root-owned store, so it requires
+// sudo on Linux for the same reason as the other profile-store mutations.
+// In mock mode the active flag is cleared on every in-memory account.
+func logoutCmd() tea.Cmd {
+	if tailscale.MockEnabled() {
+		return func() tea.Msg {
+			tailscale.MockLogout()
+			return accountActionMsg{desc: "logged out (mock)"}
+		}
+	}
+	c := exec.Command("sudo", "tailscale", "logout")
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return accountActionMsg{desc: "logged out", err: err}
+	})
+}
+
+// addAccountCmd runs `sudo tailscale login` interactively via tea.ExecProcess.
+// On Linux, adding a profile mutates the root-owned profile store and the
+// daemon returns "profiles access denied" without elevation regardless of the
+// operator role, so we pre-elevate; tea.ExecProcess hands the terminal over so
+// both the sudo password prompt and the subsequent auth URL print are visible
+// and interactive. In mock mode a new inactive profile is appended to the
+// in-memory list synchronously — no shell-out, no auth flow.
+func addAccountCmd() tea.Cmd {
+	if tailscale.MockEnabled() {
+		return func() tea.Msg {
+			tailscale.MockAddAccount()
+			return accountActionMsg{desc: "added account (mock)"}
+		}
+	}
+	c := exec.Command("sudo", "tailscale", "login")
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return accountActionMsg{desc: "added account (sudo tailscale login)", err: err}
 	})
 }
 
@@ -238,15 +304,16 @@ func addAccountCmd() tea.Cmd {
 // finishes and the TUI has been restored.
 type operatorDoneMsg struct{ err error }
 
-// currentUser resolves the local username for `--operator=`, preferring $USER.
+// currentUser resolves the local username for `--operator=` via os/user.Current
+// (a getuid() syscall — authoritative regardless of how the program was
+// launched), falling back to $USER only if that fails. Going through Current
+// avoids edge cases where $USER is empty / inherited from a parent context
+// (sudo, su, daemonized launchers) and would otherwise produce a wrong flag.
 func currentUser() string {
-	if u := os.Getenv("USER"); u != "" {
-		return u
-	}
-	if u, err := osuser.Current(); err == nil {
+	if u, err := osuser.Current(); err == nil && u.Username != "" {
 		return u.Username
 	}
-	return ""
+	return os.Getenv("USER")
 }
 
 // connectDoneMsg is delivered after the interactive connect/disconnect command
@@ -260,7 +327,14 @@ type connectDoneMsg struct {
 // down`, handing the terminal over (via tea.ExecProcess) so that an auth URL
 // printed by `up` is visible and interactive. No sudo — the user is already a
 // configured operator. The result returns as connectDoneMsg once restored.
+// In mock mode the connected flag is flipped in memory synchronously.
 func connectCmd(up bool) tea.Cmd {
+	if tailscale.MockEnabled() {
+		return func() tea.Msg {
+			tailscale.MockSetConnected(up)
+			return connectDoneMsg{up: up}
+		}
+	}
 	name := "down"
 	if up {
 		name = "up"
@@ -275,8 +349,12 @@ func connectCmd(up bool) tea.Cmd {
 // `sudo tailscale set --operator=$USER`, so the user can type their password.
 // tea.ExecProcess releases the terminal before running and restores it after;
 // stdin/stdout/stderr are left unset so they inherit the program's terminal.
-// The result comes back as operatorDoneMsg once the TUI is restored.
+// The result comes back as operatorDoneMsg once the TUI is restored. In mock
+// mode this is a no-op that just reports success — the demo always has perms.
 func operatorSetupCmd() tea.Cmd {
+	if tailscale.MockEnabled() {
+		return func() tea.Msg { return operatorDoneMsg{} }
+	}
 	c := exec.Command("sudo", "tailscale", "set", "--operator="+currentUser())
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return operatorDoneMsg{err: err}

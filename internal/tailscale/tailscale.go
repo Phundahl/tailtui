@@ -26,7 +26,12 @@ import (
 
 // Status runs `tailscale status --json` and returns the mapped local node and
 // peers. The context bounds the exec call so a hung daemon can't wedge the UI.
+// When TAILTUI_MOCK=1 (see mock.go), this short-circuits to the in-memory
+// fixture and never touches the real CLI.
 func Status(ctx context.Context) (types.LocalStatus, []types.Peer, error) {
+	if mockEnabled {
+		return mockStatusSnapshot()
+	}
 	out, err := exec.CommandContext(ctx, "tailscale", "status", "--json").Output()
 	if err != nil {
 		return types.LocalStatus{}, nil, runError(err)
@@ -49,7 +54,11 @@ type profile struct {
 
 // Accounts lists the locally-stored Tailscale profiles via `tailscale switch
 // --list --json`, mapped to types.Account with the active profile sorted first.
+// In mock mode (TAILTUI_MOCK=1), the in-memory account list is returned.
 func Accounts(ctx context.Context) ([]types.Account, error) {
+	if mockEnabled {
+		return mockAccountsSnapshot()
+	}
 	out, err := exec.CommandContext(ctx, "tailscale", "switch", "--list", "--json").Output()
 	if err != nil {
 		return nil, runError(err)
@@ -73,25 +82,6 @@ func Accounts(ctx context.Context) ([]types.Account, error) {
 	return accounts, nil
 }
 
-// SwitchAccount switches the active profile to id (`tailscale switch <id>`).
-func SwitchAccount(ctx context.Context, id string) error {
-	out, err := exec.CommandContext(ctx, "tailscale", "switch", id).CombinedOutput()
-	return cliError("tailscale switch", out, err)
-}
-
-// RemoveAccount removes a stored profile (`tailscale switch remove <id>`). It
-// only forgets the local profile; it does not delete the account upstream.
-func RemoveAccount(ctx context.Context, id string) error {
-	out, err := exec.CommandContext(ctx, "tailscale", "switch", "remove", id).CombinedOutput()
-	return cliError("tailscale switch remove", out, err)
-}
-
-// Logout logs the current session out (`tailscale logout`).
-func Logout(ctx context.Context) error {
-	out, err := exec.CommandContext(ctx, "tailscale", "logout").CombinedOutput()
-	return cliError("tailscale logout", out, err)
-}
-
 // cliError wraps a failed CombinedOutput call, surfacing the CLI's own message.
 func cliError(label string, out []byte, err error) error {
 	if err == nil {
@@ -109,8 +99,12 @@ var pingLatency = regexp.MustCompile(`in ([\d.]+)\s*ms`)
 // Ping runs a single `tailscale ping` to ip and returns the round-trip latency
 // in milliseconds. A node that doesn't answer (offline / unreachable / the local
 // node itself) yields an error rather than a zero sample, so callers can choose
-// not to pollute the history with a fake value.
+// not to pollute the history with a fake value. In mock mode the value is a
+// deterministic per-IP wave (see mockPingValue).
 func Ping(ctx context.Context, ip string) (int, error) {
+	if mockEnabled {
+		return mockPingValue(ip)
+	}
 	// --c 1: send a single ping (default is up to 10). CombinedOutput because the
 	// pong line is on stdout but failures report on stderr.
 	out, err := exec.CommandContext(ctx, "tailscale", "ping", "--c", "1", ip).CombinedOutput()
@@ -140,8 +134,12 @@ type prefsWire struct {
 
 // GetPrefs reads the live local-node preferences via `tailscale debug prefs`
 // and maps the wire shape onto the CLI-agnostic types.Prefs, so the Advanced
-// Settings checkboxes reflect the daemon's real state.
+// Settings checkboxes reflect the daemon's real state. In mock mode the
+// in-memory prefs (mutated by MockSetPref / MockSetRouting) are returned.
 func GetPrefs(ctx context.Context) (types.Prefs, error) {
+	if mockEnabled {
+		return mockPrefsSnapshot()
+	}
 	out, err := exec.CommandContext(ctx, "tailscale", "debug", "prefs").Output()
 	if err != nil {
 		return types.Prefs{}, runError(err)
@@ -173,8 +171,12 @@ func GetPrefs(ctx context.Context) (types.Prefs, error) {
 
 // SetPref toggles one boolean preference via `tailscale set --<flag>=<bool>`
 // (e.g. `--accept-routes=true`). The daemon applies it; the next GetPrefs poll
-// reconciles the model with the real state.
+// reconciles the model with the real state. In mock mode the flip is recorded
+// in the in-memory prefs so the next GetPrefs returns the new value.
 func SetPref(ctx context.Context, flag string, val bool) error {
+	if mockEnabled {
+		return MockSetPref(flag, val)
+	}
 	arg := fmt.Sprintf("--%s=%t", flag, val)
 	out, err := exec.CommandContext(ctx, "tailscale", "set", arg).CombinedOutput()
 	return cliError("tailscale set "+arg, out, err)
@@ -204,14 +206,22 @@ func AdvertiseCommandString(exitNode bool, routes []string) string {
 // SetRouting applies the advertised exit-node / subnet-route state via
 // `tailscale set --advertise-exit-node=<bool> --advertise-routes=<csv>`. The
 // change still requires approval in the Tailscale Admin Console to take effect.
+// In mock mode the working copy is applied to the in-memory prefs.
 func SetRouting(ctx context.Context, exitNode bool, routes []string) error {
+	if mockEnabled {
+		return MockSetRouting(exitNode, routes)
+	}
 	out, err := exec.CommandContext(ctx, "tailscale", AdvertiseArgs(exitNode, routes)...).CombinedOutput()
 	return cliError("tailscale set (routing)", out, err)
 }
 
 // SetExitNode runs `tailscale set --exit-node=<ip>`; an empty ip clears the exit
 // node. The daemon applies the change, which the next status poll reflects.
+// In mock mode the change is applied to the in-memory state.
 func SetExitNode(ctx context.Context, ip string) error {
+	if mockEnabled {
+		return MockSetExitNode(ip)
+	}
 	out, err := exec.CommandContext(ctx, "tailscale", "set", "--exit-node="+ip).CombinedOutput()
 	if err != nil {
 		if msg := strings.TrimSpace(string(out)); msg != "" {
