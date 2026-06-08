@@ -9,21 +9,7 @@ wraps the `tailscale` CLI in a sharp, no-nonsense TUI built on the
 ping peers, switch accounts, and flip your connection without ever leaving the
 terminal.
 
-```
- tailTUI                                              (q)uit (?)help
-┌─┤ LOCAL_NODE ├────────────┐ ┌─┤ PEER DETAILS: dc-subnet-01 ├───┐
-│ User / Host / Exit State  │ │ IDENTITY · OS · IP · Conn · Tags │
-│ Exit / Exit Latency       │ │ [e] 12 advertised routes         │
-│      [c] Disconnect       │ └──────────────────────────────────┘
-└───────────────────────────┘ ┌─┤ LATENCY HISTORY ├──────────────┐
-┌─┤ SEARCH: dc▌ ├───────────┐ │     ██      ▄▄                   │
-│ ❯ 󰒄 [ROUT] dc-subnet-01  ●│ │ ▂▂▂▂██▅▅████████▇▇               │
-│   󰒄 [ROUT] dc-subnet-02  ●│ │ ████████████████████            │
-│   󰌽 dc-bastion           ●│ ├─┤ TERMINAL_LOGS ├────────────────┤
-│   ...                     │ │ 14:55 [INFO] exit node set       │
-└───────────────────────────┘ └──────────────────────────────────┘
- [j/k] Nav [/] Search [c] Disconnect [x] Exit Node …  ● CONNECTED  v1.1.0
-```
+![tailTUI Live Demo](assets/demo.gif)
 
 ## Why tailTUI?
 
@@ -105,6 +91,13 @@ tailTUI grew from a read-only dashboard into a full configuration tool:
 
 ## Installation
 
+`tailTUI` is a single statically-compiled Go binary with **no runtime
+dependencies beyond the standard `tailscale` CLI**. It ships as one
+self-contained executable and runs identically on **any modern Linux
+distribution** — Ubuntu, Debian, Fedora, Arch, NixOS, openSUSE, Alpine — with
+no packaging tweaks, service hooks, or distro-specific patches. If
+`tailscale` is on your `PATH` and the daemon is running, `tailTUI` works.
+
 > Public release path (placeholder until the repository is published):
 
 ```bash
@@ -120,9 +113,21 @@ go build -o tailtui .
 ./tailtui
 ```
 
-**Requirements:** Go 1.26+, a working [Tailscale](https://tailscale.com)
-install (the `tailscale` CLI on your `PATH`, daemon running), and a terminal
-with a [Nerd Font](https://www.nerdfonts.com/) for the node glyphs.
+**Requirements:** Go 1.26+ (to build), a working
+[Tailscale](https://tailscale.com) install (the `tailscale` CLI on your
+`PATH`, daemon running), and a terminal with a
+[Nerd Font](https://www.nerdfonts.com/) for the node glyphs. TrueColor
+support is recommended but not required — the theme degrades gracefully to
+ANSI on 256-color terminals.
+
+> **Trying it out without a Tailnet?** Set `TAILTUI_MOCK=1` and `tailTUI`
+> runs against an in-memory anonymized fixture (7 fictional nodes, 2 mock
+> accounts, a synthetic live latency wave) without ever invoking the real
+> `tailscale` CLI — handy for screenshots, contributor demos, and the bundled
+> VHS recording (`vhs demo.tape`):
+> ```bash
+> TAILTUI_MOCK=1 go run .
+> ```
 
 ## Keybindings
 
@@ -142,14 +147,58 @@ with a [Nerd Font](https://www.nerdfonts.com/) for the node glyphs.
 | `?` | Toggle the help overlay |
 | `q` / `Ctrl+c` | Quit |
 
-## Theming
+## Permissions & sudo
 
-`tailTUI` ships with a sharp, neon-green-on-near-black **"Matrix Core"** palette
-and automatically adopts your system **[Omarchy](https://omarchy.org)** theme
-when present (read from `~/.config/omarchy/current/theme/colors.toml`). Point
-the `TAILTUI_THEME` environment variable at any compatible `colors.toml` to
-override the path. All colors are TrueColor and degrade gracefully to the
-nearest ANSI color on terminals without 24-bit support.
+`tailTUI` keeps everyday flow uninterrupted by asking for elevation only when
+the underlying Tailscale call genuinely requires it:
+
+- **Daily monitoring & node operations** — the live status poll, latency
+  graph, exit-node toggle (`x`), advanced settings (`S`), and routing
+  management (`R`, including the Command Room apply) only need the Tailscale
+  **operator** role on the local node. Run `[O]` once to grant it
+  (`sudo tailscale set --operator=$USER`, the only sudo prompt for these
+  flows); after that, daily use never asks for a password.
+- **Account Management is different** — every action inside the `[l]` modal
+  (**add `a`**, **switch `Enter`**, **remove `d`**, **logout `l`**)
+  temporarily suspends the TUI and runs the underlying `tailscale` command
+  through `sudo`. On Linux the local profile store is root-owned, so these
+  calls fail with `Access denied: profiles access denied` without elevation
+  regardless of the operator role. Your terminal stays interactive
+  throughout: type your sudo password (and, for `add`, complete the
+  `tailscale login` auth URL), and the TUI restores itself automatically when
+  the command finishes.
+
+If `tailTUI` is launched from an unprivileged session and the daemon refuses
+even the background profile-list read, the Account Management modal renders
+**“Profile store locked. Run tailTUI with sudo to view and manage accounts.”**
+instead of an empty list, and the recurring permission error is suppressed
+from the log ring rather than spammed on every refresh.
+
+## Theming & aesthetic (Omarchy roots)
+
+Out of the box, `tailTUI` ships with a hyper-minimalist, border-conscious
+**"Matrix Core"** palette — a neon-green-on-near-black look built around sharp
+single-line borders, an opaque tonal surface for overlays, and no
+rounded-corner fluff. It's intentionally translucent-friendly: with a
+slightly transparent terminal it layers cleanly over a tiling desktop
+without the boxed-in feel that boxy TUIs get.
+
+The aesthetic was designed in concert with the minimalist
+**[Omarchy](https://omarchy.org)** desktop (Hyprland, transparent terminals,
+a unified accent color), and when Omarchy is present `tailTUI`
+**automatically adopts your system theme** by reading
+`~/.config/omarchy/current/theme/colors.toml` — so it tracks your wallpaper
+and accent without configuration.
+
+**The Omarchy binding is purely cosmetic, not a requirement.** `tailTUI` is a
+stock [Bubble Tea](https://github.com/charmbracelet/bubbletea) program, so
+the default "Matrix Core" palette renders beautifully on any modern desktop
+and in any modern terminal emulator — **Alacritty, Kitty, Ghostty, WezTerm,
+Foot, GNOME Terminal, Konsole, iTerm2, Windows Terminal**, and so on. Point
+`TAILTUI_THEME` at any compatible `colors.toml` (the Omarchy schema —
+`accent`, `foreground`, `background`, `color0`–`color15`) to override the
+palette without touching the binary. All colors are TrueColor and degrade
+gracefully to the nearest ANSI color on terminals without 24-bit support.
 
 ## Status
 

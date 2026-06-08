@@ -222,16 +222,26 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "a":
-			// Add account: interactive `tailscale login` (suspends the TUI).
+			// Add account: interactive `tailscale login` (suspends the TUI). Drop
+			// to the main view first so the modal isn't the last rendered frame
+			// behind the inferior process, and so the post-ExecProcess repaint
+			// lands cleanly on the dashboard rather than a stale overlay.
+			m.state = stateMain
 			return m, addAccountCmd()
 		case "d":
-			// Remove the highlighted profile (won't forget the active one).
+			// Remove the highlighted profile (won't forget the active one). Drop
+			// to the main view first — sudo's password prompt is interactive and
+			// the post-ExecProcess repaint should land on the dashboard, not a
+			// stale modal frame (matching add/switch).
 			if a, ok := m.selectedAccount(); ok && !a.Active {
+				m.state = stateMain
 				return m, removeAccountCmd(a.ID, a.Email)
 			}
 			return m, nil
 		case "l":
-			// Log the current session out.
+			// Log the current session out. Same modal-close-before-ExecProcess
+			// pattern as add/switch/remove.
+			m.state = stateMain
 			return m, logoutCmd()
 		}
 		return m, nil
@@ -739,10 +749,19 @@ func padCol(s string, width int) string {
 }
 
 // accountsBody renders the accounts modal: each account as a (highlighted-when-
-// active) two-line block, then a divider and a two-column action grid.
+// active) two-line block, then a divider and a two-column action grid. When the
+// profile store is locked (non-elevated session), the empty-state line is
+// replaced with the "run with sudo" hint — same row count so the surrounding
+// layout (divider + action grid) stays put.
 func (m Model) accountsBody(w int) string {
 	var lines []string
-	if len(m.accounts) == 0 {
+	switch {
+	case m.profilesLocked:
+		for _, ln := range wrapText("Profile store locked. Run tailTUI with sudo to view and manage accounts.", w) {
+			lines = append(lines, modalLine(w, styles.ModalDim.Render(ln)))
+		}
+		lines = append(lines, modalLine(w, ""))
+	case len(m.accounts) == 0:
 		lines = append(lines, modalLine(w, styles.ModalDim.Render("No accounts. Press [a] to add one.")), modalLine(w, ""))
 	}
 	for i, acc := range m.accounts {

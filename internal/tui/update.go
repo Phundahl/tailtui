@@ -59,11 +59,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case operatorDoneMsg:
 		// The interactive `sudo tailscale set --operator` finished and the TUI is
-		// restored; log the outcome and refresh status so new perms take effect.
+		// restored; whatever the outcome, drop back to the main view and refresh
+		// every live data source so any newly-granted perms (accounts visible,
+		// prefs readable, status reachable) reflect immediately.
+		m.state = stateMain
+		refresh := tea.Batch(fetchStatusCmd(), fetchAccountsCmd(), fetchPrefsCmd())
 		if msg.err != nil {
-			return m.appendLog("ERROR", "operator setup: "+msg.err.Error()), nil
+			return m.appendLog("ERROR", "operator setup: "+msg.err.Error()), refresh
 		}
-		return m.appendLog("INFO", "operator set to "+currentUser()+"; refreshing"), fetchStatusCmd()
+		return m.appendLog("INFO", "operator set to "+currentUser()+"; refreshing"), refresh
 
 	case connectDoneMsg:
 		// `tailscale up`/`down` finished and the TUI is restored; log + refresh so
@@ -126,10 +130,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case accountsMsg:
 		// Live profile list arrived; refresh the model and re-render the modal if
-		// it's open. Keep the last good list on error.
+		// it's open. Keep the last good list on error. A successful read also
+		// clears profilesLocked — perms may have just been granted (e.g. operator
+		// setup just completed) and the lock hint must drop on the next refresh.
 		if msg.err != nil {
 			return m.appendLog("ERROR", msg.err.Error()), nil
 		}
+		m.profilesLocked = false
 		m.accounts = msg.accounts
 		if m.accountCursor >= len(m.accounts) {
 			m.accountCursor = 0
@@ -139,13 +146,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case accountsLockedMsg:
+		// "profiles access denied" — the profile store is root-owned and the
+		// session isn't elevated. Mark the lock so the modal can render its
+		// "run with sudo" hint, and clear the stored accounts so a stale list
+		// from a previous run can't linger behind the lock. Intentionally NO
+		// log entry: this command is re-fired on every refresh / action and
+		// would otherwise paper the ring with the same line every few seconds.
+		m.profilesLocked = true
+		m.accounts = nil
+		m.accountCursor = 0
+		if m.state == stateAccounts {
+			m.overlay.SetContent(m.accountsBody(m.overlay.Width))
+		}
+		return m, nil
+
 	case accountActionMsg:
 		// An account command (switch / remove / logout / login) finished; log it
-		// and refresh both the profile list and the node status.
+		// and refresh every live data source. Login in particular can change which
+		// prefs the daemon will return for this user, so prefs are refreshed too.
+		// On error keep the accounts refresh (so the row reverts if needed); on
+		// success do the full sync.
 		if msg.err != nil {
 			return m.appendLog("ERROR", msg.desc+": "+msg.err.Error()), fetchAccountsCmd()
 		}
-		return m.appendLog("INFO", msg.desc), tea.Batch(fetchAccountsCmd(), fetchStatusCmd())
+		return m.appendLog("INFO", msg.desc), tea.Batch(fetchAccountsCmd(), fetchStatusCmd(), fetchPrefsCmd())
 
 	case tea.KeyMsg:
 		// ctrl+c always quits, even mid-search or with an overlay open.
