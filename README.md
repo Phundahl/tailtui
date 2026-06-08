@@ -98,7 +98,7 @@ distribution** — Ubuntu, Debian, Fedora, Arch, NixOS, openSUSE, Alpine — wit
 no packaging tweaks, service hooks, or distro-specific patches. If
 `tailscale` is on your `PATH` and the daemon is running, `tailTUI` works.
 
-> Public release path (placeholder until the repository is published):
+To install the latest version directly via Go, run:
 
 ```bash
 go install github.com/Phundahl/tailtui@latest
