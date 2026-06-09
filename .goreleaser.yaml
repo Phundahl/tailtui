@@ -1,0 +1,50 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -X main.version={{.Version}} -s -w -extldflags "{{.Env.LDFLAGS}}"
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+# nfpm genererer officielle .deb (Debian/Ubuntu) og .rpm (Fedora/RedHat) pakker
+nfpms:
+  - id: tailtui-packages
+    homepage: https://github.com/Phundahl/tailtui
+    maintainer: Phundahl <https://github.com/Phundahl>
+    description: A brutalist, keyboard-centric terminal user interface for Tailscale
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    dependencies:
+      - tailscale
+    bindir: /usr/bin
+    files:
+      - src: LICENSE
+        dst: /usr/share/licenses/tailtui/LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
