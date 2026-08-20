@@ -13,13 +13,13 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -X main.version={{.Version}} -s -w -extldflags "{{.Env.LDFLAGS}}"
+      - -X main.version={{.Version}} -s -w
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
-# nfpm genererer officielle .deb (Debian/Ubuntu) og .rpm (Fedora/RedHat) pakker
+# nfpm builds official .deb (Debian/Ubuntu) and .rpm (Fedora/RedHat) packages
 nfpms:
   - id: tailtui-packages
     homepage: https://github.com/Phundahl/tailtui
@@ -32,7 +32,7 @@ nfpms:
     dependencies:
       - tailscale
     bindir: /usr/bin
-    files:
+    contents:
       - src: LICENSE
         dst: /usr/share/licenses/tailtui/LICENSE
 
