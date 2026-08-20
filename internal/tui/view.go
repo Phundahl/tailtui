@@ -11,10 +11,26 @@ import (
 )
 
 // Branding shown in the UI chrome.
-const (
-	appName    = "tailTUI"
-	appVersion = "v1.1.0"
-)
+const appName = "tailTUI"
+
+// appVersion is the version string shown in the footer. It is a var, not a
+// const, so a release build can override it from the git tag via SetVersion
+// (see main.go / .goreleaser.yaml); the literal here is the dev-build value.
+var appVersion = "v1.2.0"
+
+// SetVersion overrides the footer version string, for builds that stamp the
+// real tag in at link time. An empty version is ignored (keeping the dev-build
+// literal), and a bare "1.2.0" is normalized to "v1.2.0" since goreleaser's
+// {{.Version}} drops the prefix.
+func SetVersion(v string) {
+	if v == "" {
+		return
+	}
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	appVersion = v
+}
 
 // Fixed layout constants.
 const (
