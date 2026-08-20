@@ -186,19 +186,38 @@ without the boxed-in feel that boxy TUIs get.
 The aesthetic was designed in concert with the minimalist
 **[Omarchy](https://omarchy.org)** desktop (Hyprland, transparent terminals,
 a unified accent color), and when Omarchy is present `tailTUI`
-**automatically adopts your system theme** by reading
-`~/.config/omarchy/current/theme/colors.toml` — so it tracks your wallpaper
-and accent without configuration.
+**automatically adopts your system theme** — so it tracks your wallpaper and
+accent without configuration. Both generations of the Omarchy theme store are
+supported, newest first:
+
+| Omarchy | `colors.toml` location |
+| :-- | :-- |
+| 4 ("Quattro") and newer | `~/.local/state/omarchy/current/theme/` |
+| 3 and older | `~/.config/omarchy/current/theme/` |
+
+Light themes are honored too: `tailTUI` reads the theme's `mode` key and
+shades its panels and modals in the right direction, so a light palette
+renders as a light UI rather than an inverted one.
 
 **The Omarchy binding is purely cosmetic, not a requirement.** `tailTUI` is a
 stock [Bubble Tea](https://github.com/charmbracelet/bubbletea) program, so
 the default "Matrix Core" palette renders beautifully on any modern desktop
 and in any modern terminal emulator — **Alacritty, Kitty, Ghostty, WezTerm,
 Foot, GNOME Terminal, Konsole, iTerm2, Windows Terminal**, and so on. Point
-`TAILTUI_THEME` at any compatible `colors.toml` (the Omarchy schema —
-`accent`, `foreground`, `background`, `color0`–`color15`) to override the
-palette without touching the binary. All colors are TrueColor and degrade
-gracefully to the nearest ANSI color on terminals without 24-bit support.
+`TAILTUI_THEME` at any compatible `colors.toml` to override the palette
+without touching the binary. Either Omarchy schema is accepted, detected by
+the keys present rather than by filename:
+
+- **Omarchy 4** — semantic slots: `mode`, `accent`, `selection`, `muted`,
+  `background`, `lighter_background`, `dark_background`, `foreground`,
+  `red`, `yellow`, `orange`, `green`
+- **Omarchy 3** — flat terminal palette: `accent`, `foreground`,
+  `background`, `color0`–`color15`
+
+Mapping is per-key, so a partial or unusual palette keeps the "Matrix Core"
+default for whatever it omits — never a blank or a crash. All colors are
+TrueColor and degrade gracefully to the nearest ANSI color on terminals
+without 24-bit support.
 
 ## Status
 
