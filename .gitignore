@@ -1,3 +1,22 @@
+# Compiled binary (built from source; never commit build artifacts)
+/tailtui
+
+# Test/coverage output
+*.test
+*.out
+coverage.*
+
+# VHS demo renders are committed under assets/ deliberately; ignore stray ones
+*.gif.tmp
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Design sources: keep only the two specs the repo documents
 _designs/*
 !_designs/00_STYLE_GUIDE.md
 !_designs/00_WIREFRAME_SPEC.md

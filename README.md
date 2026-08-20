@@ -3,6 +3,8 @@
 # tailTUI
 *A brutalist, keyboard-centric terminal user interface for Tailscale.*
 
+[![ci](https://github.com/Phundahl/tailtui/actions/workflows/ci.yml/badge.svg)](https://github.com/Phundahl/tailtui/actions/workflows/ci.yml)
+
 `tailTUI` is a fast, dense, single-screen control panel for your tailnet. It
 wraps the `tailscale` CLI in a sharp, no-nonsense TUI built on the
 [Charmbracelet](https://charm.sh) stack — so you can see your whole network,
@@ -26,6 +28,28 @@ for the opposite workflow:
 - **Never leaves the terminal.** Auth flows, operator setup, and login prompts
   drop you to the shell only when *they* need to (to paste an auth URL), then
   restore the UI automatically.
+
+## What's New in v1.2.0
+
+- **Omarchy 4 ("Quattro") theme support.** Omarchy 4 moved the current-theme
+  store to `~/.local/state/omarchy/` *and* replaced the flat `color0`–`color15`
+  palette with semantic slots. tailTUI now probes both locations and reads both
+  schemas — detected by the keys present, not the filename — so upgraded and
+  older installs alike keep tracking the desktop theme instead of silently
+  falling back to the built-in palette.
+- **Light theme support.** The theme's `mode` key is honored, shading panels and
+  modals in the right direction, so light palettes like `catppuccin-latte`,
+  `flexoki-light`, and `white` render as a light UI rather than an inverted one.
+- **Demo / screenshot mode.** `TAILTUI_MOCK=1` runs the whole UI against an
+  in-memory fictional tailnet — every pane, modal, and animation, with no
+  daemon, no network, and no risk of touching a real configuration.
+- **Account management is unprivileged-aware.** The four profile actions
+  (`a`/`Enter`/`d`/`l`) elevate properly for the root-owned Linux profile store,
+  and a session without access shows a clear "profile store locked" hint inside
+  the modal instead of quietly repeating errors into the log.
+- **Prebuilt binaries.** Releases are built and published with goreleaser as
+  `.tar.gz`, `.deb`, and `.rpm` for amd64 and arm64, and the version shown in
+  the footer is stamped from the release tag.
 
 ## What's New in v1.1.0
 

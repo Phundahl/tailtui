@@ -13,7 +13,14 @@ import (
 	"github.com/Phundahl/tailtui/internal/tui"
 )
 
+// version is stamped in at link time by goreleaser
+// (-X main.version={{.Version}}). It stays empty for a plain `go build`/`go
+// run`, in which case the TUI keeps its own dev-build version literal.
+var version string
+
 func main() {
+	tui.SetVersion(version)
+
 	// Load the theme (native Omarchy palette if present, else the built-in
 	// "Matrix Core" default) and apply it before building any styles.
 	styles.Apply(styles.LoadTheme())
