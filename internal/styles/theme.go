@@ -3,6 +3,7 @@ package styles
 import (
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pelletier/go-toml/v2"
@@ -50,6 +51,55 @@ func DefaultTheme() Theme {
 		Warning:         "#ffdd75", // tertiary
 		Error:           "#ffb4ab", // error
 	}
+}
+
+// tailtuiTheme is tailTUI's own theme schema — one key per Theme field, so a
+// palette can be stated directly instead of inferred from someone else's
+// vocabulary. It is what an Omarchy template renders to (see
+// contrib/tailtui.toml.tpl), and it is equally hand-writable on any distro.
+//
+// Its keys are deliberately disjoint from the Omarchy schemas' (except the
+// shared `mode`), so schema detection stays a matter of which names appear.
+type tailtuiTheme struct {
+	Mode          string `toml:"mode"`
+	Primary       string `toml:"primary"`
+	Secondary     string `toml:"secondary"`
+	Background    string `toml:"background"`
+	Surface       string `toml:"surface"`
+	SurfaceBright string `toml:"surface_bright"`
+	Border        string `toml:"border"`
+	Text          string `toml:"text"`
+	TextDim       string `toml:"text_dim"`
+	Warning       string `toml:"warning"`
+	Error         string `toml:"error"`
+}
+
+// hasMarkers reports whether the file uses tailTUI's schema. `mode` and
+// `background` are shared with the Omarchy schemas and so are excluded.
+func (t tailtuiTheme) hasMarkers() bool {
+	return t.Primary != "" || t.Secondary != "" || t.Surface != "" ||
+		t.SurfaceBright != "" || t.Border != "" || t.Text != "" ||
+		t.TextDim != "" || t.Warning != "" || t.Error != ""
+}
+
+// mapTailtui maps tailTUI's own schema onto the Theme. Every key is optional;
+// whatever a file omits keeps its Matrix Core default.
+func mapTailtui(o tailtuiTheme) Theme {
+	t := DefaultTheme()
+	if o.Mode == ModeLight {
+		t.Mode = ModeLight
+	}
+	set(&t.PrimaryAccent, o.Primary)
+	set(&t.SecondaryAccent, o.Secondary)
+	set(&t.Background, o.Background)
+	set(&t.Surface, o.Surface)
+	set(&t.SurfaceBright, o.SurfaceBright)
+	set(&t.BorderInactive, o.Border)
+	set(&t.TextNormal, o.Text)
+	set(&t.TextDim, o.TextDim)
+	set(&t.Warning, o.Warning)
+	set(&t.Error, o.Error)
+	return t
 }
 
 // omarchyV4 mirrors the Omarchy 4 ("Quattro") colors.toml schema: semantically
@@ -116,10 +166,20 @@ func themeCandidates() []string {
 	if err != nil {
 		return nil
 	}
-	return []string{
-		filepath.Join(home, ".local", "state", "omarchy", "current", "theme", "colors.toml"), // Omarchy 4+
-		filepath.Join(home, ".config", "omarchy", "current", "theme", "colors.toml"),         // Omarchy <= 3
+	// Within each theme directory, tailtui.toml wins over colors.toml: it is
+	// opt-in (someone installed a template or wrote it), so it is the more
+	// deliberate statement of intent.
+	var paths []string
+	for _, dir := range []string{
+		filepath.Join(home, ".local", "state", "omarchy", "current", "theme"), // Omarchy 4+
+		filepath.Join(home, ".config", "omarchy", "current", "theme"),         // Omarchy <= 3
+	} {
+		paths = append(paths,
+			filepath.Join(dir, "tailtui.toml"),
+			filepath.Join(dir, "colors.toml"),
+		)
 	}
+	return paths
 }
 
 // ThemePath returns the colors.toml that LoadTheme will actually read: the
@@ -137,6 +197,20 @@ func ThemePath() string {
 		}
 	}
 	return candidates[0]
+}
+
+// ThemeStamp identifies the theme file LoadTheme would currently read, by path
+// and modification time. Callers poll it to notice a theme switch: Omarchy
+// rewrites the theme directory on every switch, so both the path and the mtime
+// can change. Zero values mean no theme file is present, which is itself a
+// state worth detecting (a theme file appearing should take effect).
+func ThemeStamp() (path string, mod time.Time) {
+	for _, p := range themeCandidates() {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p, fi.ModTime()
+		}
+	}
+	return "", time.Time{}
 }
 
 // LoadTheme returns the system (Omarchy) theme if one can be found and parsed,
@@ -165,9 +239,18 @@ func loadThemeFile(path string) (Theme, bool) {
 		return Theme{}, false // no theme file (or unreadable) — try the next
 	}
 
+	// tailTUI's own schema is the most specific, so it is tried first.
+	var own tailtuiTheme
+	if err := toml.Unmarshal(data, &own); err != nil {
+		return Theme{}, false // malformed TOML — don't crash
+	}
+	if own.hasMarkers() {
+		return mapTailtui(own), true
+	}
+
 	var v4 omarchyV4
 	if err := toml.Unmarshal(data, &v4); err != nil {
-		return Theme{}, false // malformed TOML — don't crash
+		return Theme{}, false
 	}
 	if v4.hasMarkers() {
 		return mapV4(v4), true

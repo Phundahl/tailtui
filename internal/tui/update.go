@@ -1,10 +1,22 @@
 package tui
 
 import (
+	"path/filepath"
+
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Phundahl/tailtui/internal/styles"
 	"github.com/Phundahl/tailtui/internal/types"
 )
+
+// themeSource labels a theme file for the log line, keeping the message short
+// where the path is long and predictable.
+func themeSource(path string) string {
+	if path == "" {
+		return "built-in defaults"
+	}
+	return filepath.Base(path)
+}
 
 // Update implements tea.Model.
 //
@@ -28,8 +40,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyStatus(msg)
 
 	case tickMsg:
-		// Each tick fires the next background fetch and reschedules itself.
-		return m, tea.Batch(fetchStatusCmd(), tickCmd())
+		// Each tick fires the next background fetch, re-checks the theme file,
+		// and reschedules itself.
+		return m, tea.Batch(fetchStatusCmd(), checkThemeCmd(m.themePath, m.themeMod), tickCmd())
+
+	case themeMsg:
+		// Record the stamp even when nothing changed, so a file appearing or
+		// disappearing is picked up on the next tick.
+		m.themePath, m.themeMod = msg.path, msg.mod
+		if !msg.changed {
+			return m, nil
+		}
+		// Apply on the Update goroutine: styles.Apply rewrites package-level
+		// vars that View reads.
+		styles.Apply(msg.theme)
+		m = m.appendLog("INFO", "Theme reloaded from "+themeSource(msg.path))
+		// The dashboard re-renders every frame, but viewport-backed overlays
+		// hold pre-rendered strings with the old colors baked in as ANSI codes.
+		if m.state != stateMain {
+			m = m.resizeOverlay()
+		}
+		return m, nil
 
 	case pingTickMsg:
 		// Ping the highlighted online node, and also the active exit node (so the

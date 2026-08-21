@@ -223,6 +223,30 @@ Light themes are honored too: `tailTUI` reads the theme's `mode` key and
 shades its panels and modals in the right direction, so a light palette
 renders as a light UI rather than an inverted one.
 
+### Live theme switching (optional)
+
+Install the bundled Omarchy template and `tailTUI` re-colors itself **while
+running**, within a few seconds of you switching themes — no restart:
+
+```bash
+mkdir -p ~/.config/omarchy/themed
+cp contrib/tailtui.toml.tpl ~/.config/omarchy/themed/
+```
+
+Omarchy renders the template into the active theme directory on every switch,
+and `tailTUI` notices the file change on its next refresh tick.
+
+Live reload is only half the reason to install it. The other half is control:
+the template decides which palette slot drives which part of the UI, so you can
+fix mappings that no automatic rule can get right for every theme. For example
+`osaka-jade` defines its `yellow` as a green, which leaves exit-node markers
+nearly indistinguishable from the online color — one line in the template
+(`warning = "{{ orange }}"`) fixes it, for your themes, permanently.
+
+The template is fully commented with every available placeholder. And it stays
+optional: without it, `tailTUI` reads `colors.toml` and maps the palette itself,
+exactly as before.
+
 **The Omarchy binding is purely cosmetic, not a requirement.** `tailTUI` is a
 stock [Bubble Tea](https://github.com/charmbracelet/bubbletea) program, so
 the default "Matrix Core" palette renders beautifully on any modern desktop
@@ -237,6 +261,10 @@ the keys present rather than by filename:
   `red`, `yellow`, `orange`, `green`
 - **Omarchy 3** — flat terminal palette: `accent`, `foreground`,
   `background`, `color0`–`color15`
+- **tailTUI's own** — one key per UI role: `mode`, `primary`, `secondary`,
+  `background`, `surface`, `surface_bright`, `border`, `text`, `text_dim`,
+  `warning`, `error`. This is what the template above generates, and it is
+  the format to hand-write if you want full control on any distro.
 
 Mapping is per-key, so a partial or unusual palette keeps the "Matrix Core"
 default for whatever it omits — never a blank or a crash. All colors are

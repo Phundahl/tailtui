@@ -12,6 +12,7 @@ import (
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Phundahl/tailtui/internal/styles"
 	"github.com/Phundahl/tailtui/internal/tailscale"
 	"github.com/Phundahl/tailtui/internal/types"
 )
@@ -56,6 +57,34 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+// themeMsg reports one theme-file check. changed is true only when the active
+// file's path or mtime moved, in which case theme carries the freshly parsed
+// palette.
+type themeMsg struct {
+	theme   styles.Theme
+	path    string
+	mod     time.Time
+	changed bool
+}
+
+// checkThemeCmd stats the active theme file off the UI thread and re-parses it
+// when it has moved since prevPath/prevMod. Omarchy rewrites the theme
+// directory on every switch, so this is what makes a running tailTUI follow the
+// desktop theme within one refresh tick.
+//
+// The parsed Theme is *returned*, never applied here: styles.Apply mutates
+// package-level vars that View reads, so applying it must happen in Update, on
+// the single Elm goroutine. Applying it in this closure would race the renderer.
+func checkThemeCmd(prevPath string, prevMod time.Time) tea.Cmd {
+	return func() tea.Msg {
+		path, mod := styles.ThemeStamp()
+		if path == prevPath && mod.Equal(prevMod) {
+			return themeMsg{path: path, mod: mod}
+		}
+		return themeMsg{theme: styles.LoadTheme(), path: path, mod: mod, changed: true}
+	}
 }
 
 // pingMsg carries one live latency sample (ms) for the node at ip back into the
