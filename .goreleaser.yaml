@@ -18,6 +18,12 @@ builds:
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Listing `files` replaces goreleaser's defaults, so LICENSE and README
+    # have to be restated alongside the template.
+    files:
+      - LICENSE
+      - README.md
+      - contrib/tailtui.toml.tpl
 
 # nfpm builds official .deb (Debian/Ubuntu) and .rpm (Fedora/RedHat) packages
 nfpms:
@@ -35,6 +41,10 @@ nfpms:
     contents:
       - src: LICENSE
         dst: /usr/share/licenses/tailtui/LICENSE
+      - src: contrib/tailtui.toml.tpl
+        dst: /usr/share/tailtui/tailtui.toml.tpl
+      - src: README.md
+        dst: /usr/share/doc/tailtui/README.md
 
 checksum:
   name_template: 'checksums.txt'
