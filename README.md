@@ -140,13 +140,51 @@ distribution** — Ubuntu, Debian, Fedora, Arch, NixOS, openSUSE, Alpine — wit
 no packaging tweaks, service hooks, or distro-specific patches. If
 `tailscale` is on your `PATH` and the daemon is running, `tailTUI` works.
 
-To install the latest version directly via Go, run:
+### Arch Linux (AUR)
+
+```bash
+yay -S tailtui        # or: paru -S tailtui
+```
+
+### Debian / Ubuntu / Fedora / openSUSE
+
+Grab the `.deb` or `.rpm` for your architecture from the
+[latest release](https://github.com/Phundahl/tailtui/releases/latest):
+
+```bash
+sudo dpkg -i tailtui_*_linux_amd64.deb     # Debian, Ubuntu
+sudo rpm -i tailtui_*_linux_amd64.rpm      # Fedora, openSUSE
+```
+
+### Any distribution (prebuilt binary)
+
+```bash
+# resolves the current release, so this stays correct across versions
+VER=$(curl -fsSL https://api.github.com/repos/Phundahl/tailtui/releases/latest |
+      sed -n 's/.*"tag_name": *"\(.*\)".*/\1/p')
+curl -fsSL -o tailtui.tar.gz \
+  "https://github.com/Phundahl/tailtui/releases/download/${VER}/tailtui_${VER#v}_linux_amd64.tar.gz"
+tar xzf tailtui.tar.gz
+sudo install -Dm755 tailtui /usr/local/bin/tailtui
+```
+
+Or just download it from the [releases
+page](https://github.com/Phundahl/tailtui/releases/latest) and unpack it.
+
+`arm64` builds are published alongside `amd64`. These are the recommended
+install methods: they need no Go toolchain, and they ship the Omarchy theme
+template to `/usr/share/tailtui/` so the [live theme
+switching](#live-theme-switching-optional) instructions work as written.
+
+### From source
+
+Needs the Go toolchain. Useful for tracking `main` or hacking on `tailTUI`:
 
 ```bash
 go install github.com/Phundahl/tailtui@latest
 ```
 
-Or build from source:
+Or from a clone:
 
 ```bash
 git clone https://github.com/Phundahl/tailtui
@@ -155,7 +193,18 @@ go build -o tailtui .
 ./tailtui
 ```
 
-**Requirements:** Go 1.26+ (to build), a working
+Two caveats when building yourself. `go install` places the binary in `$GOBIN`
+(or `$GOPATH/bin`), which is not always on your `PATH` — check with
+`go env GOBIN` if the command isn't found afterwards. And a source build
+installs only the binary, so the theme template has to be fetched separately:
+
+```bash
+mkdir -p ~/.config/omarchy/themed
+curl -fsSL -o ~/.config/omarchy/themed/tailtui.toml.tpl \
+  https://raw.githubusercontent.com/Phundahl/tailtui/main/contrib/tailtui.toml.tpl
+```
+
+**Requirements:** Go 1.26+ (only to build from source), a working
 [Tailscale](https://tailscale.com) install (the `tailscale` CLI on your
 `PATH`, daemon running), and a terminal with a
 [Nerd Font](https://www.nerdfonts.com/) for the node glyphs. TrueColor
@@ -252,8 +301,12 @@ mkdir -p ~/.config/omarchy/themed
 # installed from a package (AUR, .deb, .rpm)
 cp /usr/share/tailtui/tailtui.toml.tpl ~/.config/omarchy/themed/
 
-# or from a clone of this repository
+# from a clone of this repository
 cp contrib/tailtui.toml.tpl ~/.config/omarchy/themed/
+
+# built with `go install` (no template on disk — fetch it)
+curl -fsSL -o ~/.config/omarchy/themed/tailtui.toml.tpl \
+  https://raw.githubusercontent.com/Phundahl/tailtui/main/contrib/tailtui.toml.tpl
 ```
 
 Omarchy renders the template into the active theme directory on every switch,
