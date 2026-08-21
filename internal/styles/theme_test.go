@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Real fixtures, copied verbatim from shipped Omarchy themes so a schema drift
@@ -337,5 +338,163 @@ func TestInstalledOmarchyThemesMapCompletely(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// tailTUI's own schema, as an Omarchy template renders it.
+const ownTOML = `
+mode = "dark"
+primary = "#509475"
+secondary = "#549e6a"
+background = "#111c18"
+surface = "#23372B"
+surface_bright = "#32473B"
+border = "#53685B"
+text = "#C1C497"
+text_dim = "#53685B"
+warning = "#a2734b"
+error = "#FF5345"
+`
+
+func TestLoadThemeOwnSchema(t *testing.T) {
+	got := loadOverride(t, ownTOML)
+
+	want := map[string]struct{ field, value string }{
+		"Mode":            {got.Mode, ModeDark},
+		"PrimaryAccent":   {string(got.PrimaryAccent), "#509475"},
+		"SecondaryAccent": {string(got.SecondaryAccent), "#549e6a"},
+		"Background":      {string(got.Background), "#111c18"},
+		"Surface":         {string(got.Surface), "#23372B"},
+		"SurfaceBright":   {string(got.SurfaceBright), "#32473B"},
+		"BorderInactive":  {string(got.BorderInactive), "#53685B"},
+		"TextNormal":      {string(got.TextNormal), "#C1C497"},
+		"TextDim":         {string(got.TextDim), "#53685B"},
+		"Warning":         {string(got.Warning), "#a2734b"},
+		"Error":           {string(got.Error), "#FF5345"},
+	}
+	for name, c := range want {
+		if c.field != c.value {
+			t.Errorf("%s = %q, want %q", name, c.field, c.value)
+		}
+	}
+}
+
+// The whole point of the template: the user resolves mapping calls we cannot.
+// osaka-jade defines yellow as a green, so a template can route warning to
+// orange instead — something no heuristic in the loader could decide.
+func TestOwnSchemaOverridesAmbiguousMapping(t *testing.T) {
+	viaColors := loadOverride(t, v4DarkTOML)
+	if string(viaColors.Warning) != "#459451" {
+		t.Fatalf("colors.toml Warning = %q, want the theme's green-ish yellow", viaColors.Warning)
+	}
+	viaOwn := loadOverride(t, ownTOML)
+	if string(viaOwn.Warning) != "#a2734b" {
+		t.Errorf("tailtui.toml Warning = %q, want the orange the template chose", viaOwn.Warning)
+	}
+}
+
+func TestOwnSchemaLightMode(t *testing.T) {
+	got := loadOverride(t, "mode = \"light\"\nprimary = \"#0c6b3d\"\nsurface = \"#e3e4e8\"\n")
+	if got.Mode != ModeLight {
+		t.Errorf("Mode = %q, want %q", got.Mode, ModeLight)
+	}
+	if string(got.Surface) != "#e3e4e8" {
+		t.Errorf("Surface = %q, want %q", got.Surface, "#e3e4e8")
+	}
+}
+
+// Detection is by key, not filename, so the three schemas must not be confused
+// for one another regardless of where the file came from.
+func TestSchemaDetectionIsUnambiguous(t *testing.T) {
+	cases := []struct {
+		name, content, marker, want string
+	}{
+		{"own schema", ownTOML, "PrimaryAccent", "#509475"},
+		{"omarchy v4", v4DarkTOML, "PrimaryAccent", "#509475"},
+		{"legacy", legacyTOML, "PrimaryAccent", "#7aa2f7"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := string(loadOverride(t, c.content).PrimaryAccent); got != c.want {
+				t.Errorf("%s = %q, want %q", c.marker, got, c.want)
+			}
+		})
+	}
+	// The own-schema fixture must not be mistaken for an Omarchy one: it maps
+	// surface directly rather than deriving it from lighter_background.
+	if got := loadOverride(t, ownTOML); string(got.Surface) != "#23372B" {
+		t.Errorf("Surface = %q — own schema was parsed as an Omarchy file?", got.Surface)
+	}
+}
+
+// tailtui.toml is opt-in, so it outranks colors.toml in the same directory.
+func TestThemePathPrefersOwnSchemaInThemeDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("TAILTUI_THEME", "")
+
+	dir := filepath.Join(home, ".local", "state", "omarchy", "current", "theme")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for name, content := range map[string]string{
+		"colors.toml":  v4DarkTOML,
+		"tailtui.toml": ownTOML,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	want := filepath.Join(dir, "tailtui.toml")
+	if got := ThemePath(); got != want {
+		t.Errorf("ThemePath() = %q, want %q", got, want)
+	}
+	// The distinguishing value: only the own-schema fixture sets warning to orange.
+	if got := LoadTheme(); string(got.Warning) != "#a2734b" {
+		t.Errorf("Warning = %q, want tailtui.toml's %q", got.Warning, "#a2734b")
+	}
+}
+
+// Falling back to colors.toml when no template is installed is what keeps the
+// zero-config path working.
+func TestThemePathFallsBackToColorsWhenNoTemplate(t *testing.T) {
+	stubHome(t, v4DarkTOML, "")
+	want := filepath.Join(os.Getenv("HOME"), ".local", "state", "omarchy", "current", "theme", "colors.toml")
+	if got := ThemePath(); got != want {
+		t.Errorf("ThemePath() = %q, want %q", got, want)
+	}
+}
+
+// ThemeStamp drives live reload, so it must track both which file is active and
+// when it changed.
+func TestThemeStampTracksFileChanges(t *testing.T) {
+	path := writeTheme(t, ownTOML)
+	t.Setenv("TAILTUI_THEME", path)
+
+	gotPath, mod := ThemeStamp()
+	if gotPath != path {
+		t.Fatalf("ThemeStamp path = %q, want %q", gotPath, path)
+	}
+	if mod.IsZero() {
+		t.Fatal("ThemeStamp mod time is zero for an existing file")
+	}
+
+	// A theme switch rewrites the file; the stamp must move with it.
+	future := mod.Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+	_, mod2 := ThemeStamp()
+	if !mod2.After(mod) {
+		t.Errorf("mod time did not advance: %v then %v", mod, mod2)
+	}
+}
+
+func TestThemeStampEmptyWhenNoThemeFile(t *testing.T) {
+	t.Setenv("TAILTUI_THEME", filepath.Join(t.TempDir(), "absent.toml"))
+	path, mod := ThemeStamp()
+	if path != "" || !mod.IsZero() {
+		t.Errorf("ThemeStamp() = (%q, %v), want empty", path, mod)
 	}
 }

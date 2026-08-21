@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Phundahl/tailtui/internal/styles"
 	"github.com/Phundahl/tailtui/internal/tailscale"
 	"github.com/Phundahl/tailtui/internal/types"
 )
@@ -69,6 +70,14 @@ type Model struct {
 	// so a non-elevated session doesn't flood the ring every refresh.
 	profilesLocked bool
 
+	// themePath/themeMod stamp the theme file the current palette was loaded
+	// from. Each refresh tick re-stats it (checkThemeCmd) and re-applies the
+	// palette when it moves, so switching the desktop theme re-colors a running
+	// tailTUI. Seeded in New() from the file main already applied, so the first
+	// check doesn't report a spurious change.
+	themePath string
+	themeMod  time.Time
+
 	// Advanced Settings modal state. prefs holds the live local-node preferences
 	// (read via tailscale.GetPrefs); settingCursor is the highlighted toggle.
 	prefs         types.Prefs
@@ -123,11 +132,14 @@ func New() Model {
 	if tailscale.MockEnabled() {
 		latency = tailscale.MockLatencySeed()
 	}
+	themePath, themeMod := styles.ThemeStamp()
 	return Model{
-		state:   stateMain,
-		overlay: viewport.New(0, 0), // sized when an overlay is opened
-		peers:   newPeerList(nil),
-		latency: latency,
+		state:     stateMain,
+		themePath: themePath,
+		themeMod:  themeMod,
+		overlay:   viewport.New(0, 0), // sized when an overlay is opened
+		peers:     newPeerList(nil),
+		latency:   latency,
 		// logs start empty (no mock seed); real events populate the ring.
 		// accounts are fetched live (tailscale switch --list) by Init / on open.
 	}
