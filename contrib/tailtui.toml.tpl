@@ -17,8 +17,9 @@
 # Available names include the semantic slots (accent, background, foreground,
 # selection, muted, red, green, yellow, orange, blue, cyan, magenta, and the
 # bright_/dark_/light_ variants), the legacy terminal palette (color0-color15),
-# and `mode`. Modifiers: {{ x_strip }} drops the leading #, {{ x_rgb }} gives
-# decimal "r,g,b", and {{ mix a b 30% }} blends two colors.
+# and `mode`. A _strip suffix on a name drops the leading #, _rgb gives it
+# as decimal "r,g,b", and a mix function blends two colors. The bundled
+# alacritty.toml.tpl.sample in this directory documents their exact syntax.
 #
 # Run `omarchy-theme-color --file ~/.local/state/omarchy/current/theme/colors.toml --all`
 # to print every name your current theme defines.
@@ -37,7 +38,7 @@ secondary = "{{ green }}"
 background = "{{ background }}"
 
 # Elevated panels and modals — one step away from the canvas. On a light theme
-# swap this for {{ dark_background }} so panels shade downward instead of up.
+# use the dark_background slot instead, so panels shade downward, not up.
 surface = "{{ lighter_background }}"
 
 # The selected row's highlight bar.
@@ -57,7 +58,7 @@ text_dim = "{{ muted }}"
 # `yellow` is the obvious choice, but some themes define it as something that
 # collides with `green` — osaka-jade sets yellow to #459451, which would make
 # exit-node markers nearly indistinguishable from the online color. If that
-# happens in your theme, use {{ orange }} here instead. This is exactly the
+# happens in your theme, use the orange slot here instead. This is exactly the
 # judgement call a template exists to hand back to you.
 warning = "{{ yellow }}"
 
