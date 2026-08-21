@@ -29,6 +29,24 @@ for the opposite workflow:
   drop you to the shell only when *they* need to (to paste an auth URL), then
   restore the UI automatically.
 
+## What's New in v1.3.0
+
+- **Live theme switching.** Switch your desktop theme and a running `tailTUI`
+  re-colors itself within a few seconds — no restart, and it works with a modal
+  open. Implemented on the existing refresh tick, so there is no file-watcher
+  dependency and no extra background work.
+- **A theme format of tailTUI's own.** A `tailtui.toml` with one key per UI role
+  (`primary`, `surface`, `warning`, …) now takes precedence over the raw Omarchy
+  palette. Write it by hand on any distro, or generate it from the bundled
+  Omarchy template.
+- **You decide the ambiguous mappings.** Some palettes cannot be mapped
+  automatically — `osaka-jade` defines its `yellow` as a green, which leaves
+  exit-node markers nearly indistinguishable from the online color. A template
+  settles it in one line, per theme, instead of `tailTUI` guessing.
+
+None of this is required: with no template installed, `tailTUI` reads the
+theme's `colors.toml` and maps it itself, exactly as before.
+
 ## What's New in v1.2.0
 
 - **Omarchy 4 ("Quattro") theme support.** Omarchy 4 moved the current-theme
@@ -230,6 +248,11 @@ running**, within a few seconds of you switching themes — no restart:
 
 ```bash
 mkdir -p ~/.config/omarchy/themed
+
+# installed from a package (AUR, .deb, .rpm)
+cp /usr/share/tailtui/tailtui.toml.tpl ~/.config/omarchy/themed/
+
+# or from a clone of this repository
 cp contrib/tailtui.toml.tpl ~/.config/omarchy/themed/
 ```
 

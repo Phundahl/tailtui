@@ -20,15 +20,15 @@ func TestSetVersion(t *testing.T) {
 	cases := []struct {
 		name, in, want string
 	}{
-		{"bare goreleaser version", "1.2.0", "v1.2.0"},
-		{"already prefixed", "v1.2.0", "v1.2.0"},
-		{"prerelease", "1.3.0-rc1", "v1.3.0-rc1"},
-		{"unstamped build keeps the literal", "", "v1.2.0"},
+		{"bare goreleaser version", "9.9.9", "v9.9.9"},
+		{"already prefixed", "v9.9.9", "v9.9.9"},
+		{"prerelease", "9.9.9-rc1", "v9.9.9-rc1"},
+		{"unstamped build keeps the literal", "", "v0.0.0-devbuild"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			restoreVersion(t)
-			appVersion = "v1.2.0" // the dev-build literal
+			appVersion = "v0.0.0-devbuild" // stands in for the dev-build literal
 			SetVersion(c.in)
 			if appVersion != c.want {
 				t.Errorf("SetVersion(%q) → %q, want %q", c.in, appVersion, c.want)
