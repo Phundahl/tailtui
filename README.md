@@ -39,10 +39,10 @@ for the opposite workflow:
   (`primary`, `surface`, `warning`, …) now takes precedence over the raw Omarchy
   palette. Write it by hand on any distro, or generate it from the bundled
   Omarchy template.
-- **You decide the ambiguous mappings.** Some palettes cannot be mapped
-  automatically — `osaka-jade` defines its `yellow` as a green, which leaves
+- **Ambiguous mappings are settled explicitly.** Some palettes cannot be mapped
+  automatically: a theme may define its `yellow` as a green, which would leave
   exit-node markers nearly indistinguishable from the online color. A template
-  settles it in one line, per theme, instead of `tailTUI` guessing.
+  resolves cases like that in one line, per theme, instead of `tailTUI` guessing.
 
 None of this is required: with no template installed, `tailTUI` reads the
 theme's `colors.toml` and maps it itself, exactly as before.
@@ -313,11 +313,12 @@ Omarchy renders the template into the active theme directory on every switch,
 and `tailTUI` notices the file change on its next refresh tick.
 
 Live reload is only half the reason to install it. The other half is control:
-the template decides which palette slot drives which part of the UI, so you can
-fix mappings that no automatic rule can get right for every theme. For example
-`osaka-jade` defines its `yellow` as a green, which leaves exit-node markers
-nearly indistinguishable from the online color — one line in the template
-(`warning = "{{ orange }}"`) fixes it, for your themes, permanently.
+the template decides which palette slot drives which part of the UI, which makes
+it possible to fix mappings that no automatic rule can get right for every theme.
+Some palettes, for instance, define their `yellow` as a green, which leaves
+exit-node markers nearly indistinguishable from the online color; a single line
+in the template (`warning = "{{ orange }}"`) settles that theme's mapping for
+good.
 
 The template is fully commented with every available placeholder. And it stays
 optional: without it, `tailTUI` reads `colors.toml` and maps the palette itself,
