@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"errors"
+	"fmt"
+	"os/exec"
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -112,6 +115,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.appendLog("INFO", action+" succeeded; refreshing"), fetchStatusCmd()
 
+	case sshDoneMsg:
+		// An interactive SSH session ended and the TUI is restored.
+		m.state = stateMain // defensive: the launcher already closed before dispatch
+		switch {
+		case msg.mock:
+			return m.appendLog("INFO", "ssh "+msg.target+" (mock — not executed)"), nil
+		case msg.err == nil:
+			return m.appendLog("INFO", "ssh session to "+msg.target+" ended"), fetchStatusCmd()
+		default:
+			// A non-zero exit is NORMAL here: ssh returns the remote command's
+			// status, so typing `exit 1` in your own shell would otherwise paint a
+			// red ERROR in the ring. Reserve ERROR for a failure to start at all.
+			var ee *exec.ExitError
+			if errors.As(msg.err, &ee) {
+				return m.appendLog("WARN", fmt.Sprintf("ssh %s exited with status %d", msg.target, ee.ExitCode())), fetchStatusCmd()
+			}
+			return m.appendLog("ERROR", "ssh "+msg.target+": "+msg.err.Error()), fetchStatusCmd()
+		}
+
 	case prefsMsg:
 		// Live local-node preferences arrived; store them so the Advanced Settings
 		// checkboxes (rendered from m.prefs each frame) reflect reality. Keep the
@@ -151,10 +173,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.appendLog("INFO", "applied: "+msg.desc), tea.Batch(fetchStatusCmd(), fetchPrefsCmd())
 
 	case clipboardMsg:
-		// Copy-to-clipboard finished; flash "Copied!" in the Command Room (or log
-		// the failure when no clipboard tool is available).
+		// Copy-to-clipboard finished; flash "Copied!" in the modal that asked (or
+		// log the failure when no clipboard tool is available).
 		if msg.err != nil {
 			return m.appendLog("ERROR", "clipboard: "+msg.err.Error()), nil
+		}
+		if msg.kind == clipboardSSH {
+			m.sshCopied = true
+			return m.appendLog("INFO", "ssh command copied to clipboard"), nil
 		}
 		m.routingCopied = true
 		return m.appendLog("INFO", "routing command copied to clipboard"), nil
@@ -249,8 +275,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the live prefs.
 			return m.openSettings(), fetchPrefsCmd()
 		case "s":
-			// Lowercase `s` is intentionally reserved for the future SSH-as-action
-			// feature; ignore it for now so it never reaches the list keymap.
+			// Open the SSH launcher for the highlighted peer. Offered on any
+			// ONLINE peer — one that does not advertise sshHostKeys may still be
+			// reachable via a plain sshd, and the modal says which case you are in
+			// before anything runs. Offline peers are a silent no-op, matching `x`
+			// on a peer that does not offer exit-node service.
+			if p, ok := m.selectedPeer(); ok && p.Online {
+				return m.openSSH(p), nil
+			}
 			return m, nil
 		case "R":
 			// Open the Routing Management modal (uppercase R / shift+r) and refresh

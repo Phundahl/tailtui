@@ -66,6 +66,23 @@ Sleep 800ms
 Escape
 Sleep 600ms
 
+# SSH launcher on srv-web-01 (the node highlighted after the walk above) — preview
+# the exact command, retype the user (Ctrl+U clears; [e] opens with the cursor at the end),
+# then cancel.
+# Safe under TAILTUI_MOCK=1: the mock branch never spawns a real ssh.
+Type "s"
+Sleep 2500ms
+Type "e"
+Sleep 800ms
+Ctrl+U
+Sleep 400ms
+Type "deploy"
+Sleep 1s
+Enter
+Sleep 1500ms
+Escape
+Sleep 600ms
+
 # Account Management showcase — open, hold so the polished layout reads, close.
 Type "l"
 Sleep 3s

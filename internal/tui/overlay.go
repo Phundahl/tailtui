@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -129,9 +130,58 @@ func (m Model) openLogs() Model {
 	return m
 }
 
+// newModalInput builds a text editor themed to blend into the modal Surface.
+// It is the single home for two subtle, hard-won rendering fixes; every modal
+// editor (routing CIDRs, the SSH username) MUST be built through it.
+//
+// The "black box" (Phase 23.2): a textinput with a Placeholder set renders, when
+// empty, via placeholderView, which fills the remainder of the field's Width
+// with RAW unstyled spaces — a default-background (near-black) block that no
+// outer Surface wrap can recolor (the spaces sit mid-line, after a reset). With
+// NO placeholder the main render path pads instead with TextStyle, which carries
+// the Surface background, so every cell of the field is Surface. The prompt label
+// above the field carries the example text instead, so dropping the in-field
+// placeholder loses nothing.
+//
+// The cursor must be a clearly VISIBLE bright block. bubbles/cursor draws its
+// visible cell with Style.Reverse(true), which swaps fg/bg at display time — so
+// the DISPLAYED background is Style's Foreground. We therefore set Foreground to
+// Primary (becomes the bright block background) and Background to Bg (becomes the
+// glyph color), giving a solid Primary block with a dark glyph — never invisible
+// (the Phase 23.2 fg-Surface camouflage) and never a black block. Cursor.TextStyle
+// keeps the blink-"off" phase rendering as normal text on the Surface.
+func newModalInput(charLimit int) textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = "> "
+	ti.CharLimit = charLimit
+	restyleModalInput(&ti)
+	return ti // Placeholder is deliberately never set — see above.
+}
+
+// restyleModalInput re-applies the theme-derived styles to an existing editor.
+// Those styles are captured BY VALUE at construction, so after a live theme
+// reload (themeMsg -> styles.Apply) a stored textinput would keep the old
+// palette baked in — a stale cursor/prompt color in an otherwise re-themed UI.
+// resizeOverlay is already the post-theme-reload hook, so it calls this for
+// every modal that owns an editor.
+func restyleModalInput(ti *textinput.Model) {
+	ti.PromptStyle = styles.ModalAccent
+	ti.TextStyle = styles.ModalText
+	ti.Cursor.TextStyle = styles.ModalText
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.Bg)
+}
+
 // resizeOverlay re-sizes and re-renders the active overlay after a window
 // resize, so the modal tracks the terminal dimensions.
 func (m Model) resizeOverlay() Model {
+	if m.state == stateSSH {
+		// Rendered from model state each frame, so there is no viewport content
+		// to rebuild — but the editor's visible window is width-dependent and
+		// its styles are theme-dependent, so both still have to track changes.
+		m.sshUser.Width = clampInputWidth(overlayWidth(m.width))
+		restyleModalInput(&m.sshUser)
+		return m
+	}
 	if m.state == stateSettings || m.state == stateRoutingConfirm {
 		// Rendered straight from model state each frame via overlayCenter, so a
 		// resize needs no precomputed viewport content.
@@ -150,6 +200,7 @@ func (m Model) resizeOverlay() Model {
 		content = m.accountsBody(w)
 	case stateRouting:
 		m.routingInput.Width = clampInputWidth(w)
+		restyleModalInput(&m.routingInput)
 		content = m.routingBody(w)
 	case stateLogs:
 		lw := logOverlayWidth(m.width) // wider than the other modals
@@ -179,6 +230,15 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// (not all the way to the main view), so it can't fall through to the close.
 	if m.state == stateRoutingConfirm {
 		return m.updateRoutingConfirm(msg)
+	}
+	// The SSH launcher owns ALL its keys, in both sub-modes, so it sits above
+	// the global close. Two reasons: a username may legitimately contain a `q`
+	// ("qa-runner"), which the global close would truncate; and in nav mode
+	// `[e]` is one keystroke from that field, so routing every SSH key through
+	// one handler means there is exactly one function to read to know what any
+	// key does here.
+	if m.state == stateSSH {
+		return m.updateSSH(msg)
 	}
 	if key == "esc" || key == "q" {
 		m.state = stateMain
@@ -301,6 +361,11 @@ func (m Model) renderOverlay(base string) string {
 	// directly from model state, not the shared viewport.
 	if m.state == stateSettings {
 		return m.renderSettingsOverlay(base)
+	}
+	// The SSH launcher is rendered directly too, so the command preview and the
+	// username editor re-render on every keystroke.
+	if m.state == stateSSH {
+		return m.renderSSHOverlay(base)
 	}
 	// The routing confirmation ("Command Room") is also rendered directly.
 	if m.state == stateRoutingConfirm {
@@ -691,6 +756,7 @@ func helpBody(w int) string {
 		{"Connect / Disconnect", "c"},
 		{"Toggle Exit Node", "x"},
 		{"Expand Subnet Routes", "e"},
+		{"SSH to Peer", "s"},
 		{"Operator Setup (sudo)", "O"},
 	})...)
 	lines = append(lines, group("GLOBAL", [][2]string{

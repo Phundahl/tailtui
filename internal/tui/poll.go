@@ -3,9 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	osuser "os/user"
 	"strings"
 	"time"
 
@@ -192,15 +190,31 @@ func setRoutingCmd(exitNode bool, routes []string) tea.Cmd {
 	}
 }
 
-// clipboardMsg carries the result of a copy-to-clipboard action.
-type clipboardMsg struct{ err error }
+// clipboardKind identifies which modal asked for a copy, so the result flashes
+// the right "Copied!" indicator. Routing is the ZERO VALUE deliberately: it
+// keeps every existing clipboardMsg construction valid and correct. Carrying the
+// kind on the message rather than branching on m.state at delivery time also
+// closes a real (if benign) race — press `c`, then Esc before the clipboard
+// goroutine returns, and a state-based branch would set the wrong flag.
+type clipboardKind int
 
-// copyRoutingCmd copies text to the system clipboard off the UI thread (atotto/
+const (
+	clipboardRouting clipboardKind = iota
+	clipboardSSH
+)
+
+// clipboardMsg carries the result of a copy-to-clipboard action.
+type clipboardMsg struct {
+	kind clipboardKind
+	err  error
+}
+
+// copyCmd copies text to the system clipboard off the UI thread (atotto/
 // clipboard shells out to the platform tool — pbcopy / wl-copy / xclip / clip),
 // so a missing tool surfaces as an error rather than blocking or crashing.
-func copyRoutingCmd(text string) tea.Cmd {
+func copyCmd(kind clipboardKind, text string) tea.Cmd {
 	return func() tea.Msg {
-		return clipboardMsg{err: clipboard.WriteAll(text)}
+		return clipboardMsg{kind: kind, err: clipboard.WriteAll(text)}
 	}
 }
 
@@ -333,17 +347,11 @@ func addAccountCmd() tea.Cmd {
 // finishes and the TUI has been restored.
 type operatorDoneMsg struct{ err error }
 
-// currentUser resolves the local username for `--operator=` via os/user.Current
-// (a getuid() syscall — authoritative regardless of how the program was
-// launched), falling back to $USER only if that fails. Going through Current
-// avoids edge cases where $USER is empty / inherited from a parent context
-// (sudo, su, daemonized launchers) and would otherwise produce a wrong flag.
-func currentUser() string {
-	if u, err := osuser.Current(); err == nil && u.Username != "" {
-		return u.Username
-	}
-	return os.Getenv("USER")
-}
+// currentUser resolves the local username for `--operator=` and as the default
+// SSH login. The resolution logic lives in the adapter (tailscale.CurrentUser)
+// because the mock fixtures need the same answer; this stays as the in-package
+// spelling used by the UI.
+func currentUser() string { return tailscale.CurrentUser() }
 
 // connectDoneMsg is delivered after the interactive connect/disconnect command
 // finishes and the TUI has been restored.
@@ -371,6 +379,42 @@ func connectCmd(up bool) tea.Cmd {
 	c := exec.Command("tailscale", name)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return connectDoneMsg{up: up, err: err}
+	})
+}
+
+// sshDoneMsg is delivered after an interactive `tailscale ssh` session ends and
+// the TUI has been restored.
+type sshDoneMsg struct {
+	target string
+	mock   bool
+	err    error
+}
+
+// sshLaunchCmd suspends the TUI and hands the terminal to `tailscale ssh
+// [user@]host`. No sudo — the wrapper needs none — and, uniquely among the
+// commands in this file, NO context timeout: every other one is boxed to 8-15s,
+// but an interactive session is unbounded by definition and a context would kill
+// it mid-work.
+//
+// `tailscale ssh` execs the SYSTEM ssh client, so a missing `ssh` binary is
+// pre-flighted here rather than left to the child: the error then lands in the
+// log ring (readable with [v]) instead of flashing past during the restore.
+//
+// In mock mode nothing is executed — the demo (and `vhs demo.tape`) must never
+// spawn a real ssh.
+func sshLaunchCmd(user, host string) tea.Cmd {
+	target := tailscale.SSHTarget(user, host)
+	if tailscale.MockEnabled() {
+		return func() tea.Msg { return sshDoneMsg{target: target, mock: true} }
+	}
+	if _, err := exec.LookPath("ssh"); err != nil {
+		return func() tea.Msg {
+			return sshDoneMsg{target: target, err: fmt.Errorf("no ssh client on PATH: %w", err)}
+		}
+	}
+	c := exec.Command("tailscale", tailscale.SSHArgs(user, host)...)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return sshDoneMsg{target: target, err: err}
 	})
 }
 

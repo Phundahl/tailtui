@@ -93,13 +93,21 @@ func (peerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	// Selected row: a full-width surface-bright bar with a leading ❯ pointer.
 	// Built from plain text so the single Selected style paints the whole row
 	// uniformly (no fg-only gaps in the highlight).
+	// SSH capability marker: right-hand side, so the left column (icon / badge /
+	// hostname) keeps its alignment. Plain text — no Nerd Font glyph, since an
+	// unverified codepoint would render as tofu and desynchronize the width.
+	ssh := ""
+	if p.OffersSSH {
+		ssh = "ssh  "
+	}
+
 	if selected {
 		exit := ""
 		if p.IsActiveExitNode {
 			exit = "󰖟 exit  "
 		}
 		left := "❯ " + joinFields(p.Icon(), p.Badge(), p.Hostname)
-		row := joinRow(left, exit+glyph, width)
+		row := joinRow(left, ssh+exit+glyph, width)
 		fmt.Fprint(w, styles.Selected.Render(row))
 		return
 	}
@@ -123,6 +131,9 @@ func (peerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	}
 	if p.IsActiveExitNode {
 		right = styles.ExitName.Render("󰖟 exit") + "  " + right
+	}
+	if ssh != "" {
+		right = styles.Badge.Render("ssh") + "  " + right
 	}
 	left := "  " + joinFields(icon, badge, name)
 	fmt.Fprint(w, joinRow(left, right, width))
