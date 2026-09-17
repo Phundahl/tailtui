@@ -192,6 +192,7 @@ Before changing any interaction, consult the keybinding matrix in `_designs/00_W
 - **Phase 33 — Neutral wording for the theme-mapping rationale** — the README justified the `tailtui.toml` template in two places by naming one shipped Omarchy theme and addressing the reader in the second person: the v1.3.0 changelog bullet ("You decide the ambiguous mappings … `osaka-jade` defines its `yellow` as a green") and the Theming section's template paragraph ("… fixes it, for your themes, permanently"). On a public repo that reads as pointed at a specific theme and its author rather than as documentation of a general problem. Both passages now state the case generically — *some palettes define their `yellow` as a green, which leaves exit-node markers nearly indistinguishable from the online color* — while keeping the concrete `warning = "{{ orange }}"` fix, which is the part a reader actually needs in order to write their own template. **The rule this sets**: public-facing docs describe the *class* of problem, not a named third-party theme that fails at it; internal notes may stay specific — `CLAUDE.md`'s Phase 30 entry still names `osaka-jade` deliberately, because the mapping decision it records only makes sense against the concrete case. Docs-only — no Go, test, or packaging changes, and no version bump (nothing user-facing changed in the program itself).
 - **Phase 34 — SSH launcher (`s`)** — bound lowercase `s`, reserved since Phase 20.1, to an `SSH_LAUNCH` modal (`stateSSH`, `internal/tui/ssh.go`) that previews and then runs `tailscale ssh [user@]host` for the highlighted peer via `tea.ExecProcess`. **Capability detection cost nothing**: `tailscale status --json` already carries per-peer `sshHostKeys`, populated only when that node runs the Tailscale SSH server, so one new wire field on `node` yields `types.Peer.OffersSSH` with no extra CLI call — advisory only, since per-peer `CapMap` is always `null` and therefore ACL permission is unknowable client-side (the modal carries a static caveat instead, the structural twin of the Command Room's Admin Console reminder). **Two sub-modes, forced rather than preferred**: an always-focused username field and a `[c]` copy key are mutually exclusive, so the modal opens in nav mode with the field blurred and pre-filled (`currentUser()`, then session-sticky via `sshLastUser`) and `[e]` enters the editor — reusing the routing list/input split verbatim, including the early `updateOverlay` guard that hands *every* key (incl. `esc`/`q`) to the editor so a username containing a `q` survives. **Gating is deliberately looser than `[x]`**: offered on any *online* peer, because a node without Tailscale SSH may still run a plain sshd; the modal shows `[ADVERTISED]`/`[NOT ADVERTISED]` up front. Capability is marked on the right of the peer-list row (plain `ssh`, no Nerd Font glyph — an unverified codepoint would render as tofu and desync the width) and as a green `[s] Tailscale SSH` line in PEER DETAILS (6 identity rows + 2 hints = 8, inside the 9 inner rows, so `localNodeH` is untouched). Pure `SSHTarget`/`SSHArgs`/`SSHCommandString` sit beside the Advertise pair, with the preview built *from* the argv so it cannot drift. Execution takes **no timeout** (an interactive session is unbounded) and pre-flights `exec.LookPath("ssh")`; a non-zero exit is logged **WARN with the code**, not ERROR, because `ssh` returns the *remote* command's status. **Three adjacent fixes rode along**: `newModalInput` now owns the textinput styling contract for both editors, which exposed a pre-existing latent bug — those styles are captured by value at construction, so a live theme reload left a stale cursor color baked in; `restyleModalInput` re-applies them from `resizeOverlay` (regression test verified to fail without it). `clipboardMsg` gained a `kind` (routing as the zero value) so a second copier cannot flash the wrong indicator. And `[O] Operator` now retires from the footer once `prefs.OperatorUser` matches the current user — a one-time step shouldn't hold permanent footer space, and retiring it is what buys room for `[s] SSH`. Also repointed CLAUDE.md's two references to the long-deleted `design-spec.md` at `_designs/00_WIREFRAME_SPEC.md`. **Deliberate divergence from that spec**: it binds `s / Enter`; only `s` is bound, because `Enter` is the most reflexively-pressed key on a list and the accident cost is suspending into a remote shell. New `internal/tailscale/ssh_test.go` + `internal/tui/ssh_test.go` (incl. `newModelWithPeers`, the peer-seeding helper the suite lacked); `TestSettingsHotkeyIsUppercase` was strengthened — it would have kept passing for an accidental reason, since the shared helper builds an empty peer list.
 - **Phase 35 — Release v1.4.0** — bumped `appVersion` `v1.3.0` → `v1.4.0` (still the single definition, in `view.go`) for Phase 34's SSH launcher. README gained a "What's New in v1.4.0" section; the launcher's own docs — the feature bullet, the keybindings row, the Permissions & sudo note about ACLs, the Installation caveat that `tailscale ssh` wraps the **system `ssh` client**, and the Phase 34 log entry — all shipped with the feature itself, per the standing rule: **docs ride in the feature PR, and the release PR carries only version, changelog, and phase log**. `version_test.go` needed no edit (Phase 31 decoupled it from the real version string). **Live verification closed the Phase 34 gap**: the `tea.ExecProcess` suspend/restore path — the one thing the headless suite cannot reach, since no peer on the development tailnet advertises `sshHostKeys` — was confirmed by hand against a real target, including the return to the dashboard when the session exits.
+- **Phase 36 — Release checklist** — the v1.4.0 cycle shipped correctly but the **AUR package sat at 1.3.0-1 afterwards**, because the bump lived only in the maintainer's memory: it is a separate git repo (`aur@aur.archlinux.org:tailtui.git`), invisible from this one, with no CI and nothing in the release flow pointing at it. Added a **Release checklist** section to CLAUDE.md making the order explicit and the dependencies between steps stated — feature PR (code + its docs + phase entry) → release PR (version + changelog only, branched *after* the feature merges, or the changelog describes work the tag won't carry) → annotated tag → **verify the published artifacts** → AUR bump. The verify step is not ceremony: it re-checks the `-X main.version` ldflag, which Phase 29 shipped as a silent no-op because Go ignores `-X` on a missing symbol, and it re-checks that the `.deb` still carries `contrib/tailtui.toml.tpl` per the Phase 31 packaging rule. The AUR step spells out `makepkg --printsrcinfo > .SRCINFO` (the AUR rejects a mismatched `.SRCINFO`) and a real `makepkg -f` build before pushing, since a broken PKGBUILD reaches users with no CI in between. The Git-workflow bullet on releases now defers to the checklist instead of restating a subset of it. **goreleaser's `aurs:` automation was evaluated and rejected**: it generates a `-bin` package that installs the prebuilt binary, whereas this PKGBUILD builds from source with Arch's hardening flags, so adopting it would mean either renaming the package (orphaning the name users have installed) or silently swapping every user onto an unhardened binary. Recorded in the checklist so it isn't re-litigated from scratch. Docs-only — no Go, test, or packaging changes, and no version bump.
 - **Upcoming (next major cycle — see the README Roadmap)** —
   - **Tailscale Serve & Funnel management**: visual port forwarding to securely expose local services to the tailnet (`tailscale serve`) or the public internet (`tailscale funnel`), driven from keyboard overlays in the existing modal style.
   - **Connection diagnostics**: deep-dive into peer connection health — DERP-relay vs. direct routing and the signals to debug a flaky link (likely from `tailscale status --json` endpoints + `tailscale ping`/`netcheck`).
@@ -251,8 +252,51 @@ Adopted in the v1.2.0 cycle; `main` is a published, public branch.
 - **Rebase onto the latest `main` before opening a PR**, so the PR is tested against current `main` rather than a stale base.
 - **Order dependent work so the safety net lands first.** CI went in ahead of the feature PRs precisely so they were gated by it.
 - **Scope a PR to files it truly needs.** When several changes touch the same doc (the phase log especially), split by replaying the edits in phase order across sequential branches rather than hunk-splitting one big diff.
-- **Releases are tags on `main`** (`git tag -a vX.Y.Z && git push origin vX.Y.Z`), which is the only trigger for `release.yml`. Bump `appVersion` in `view.go` in the release PR, before tagging.
+- **Releases are tags on `main`**, which is the only trigger for `release.yml`. The full order — feature PR, release PR, tag, verify, AUR bump — is the **Release checklist** below; follow it rather than reconstructing it from memory.
 - **Commit identity is the pseudonym only** — `Phundahl <89451493+Phundahl@users.noreply.github.com>`. Never let a real-name or employer-domain address into commit metadata; this is the attribution rule above, applied to Git itself.
+
+## Release checklist (required)
+
+Adopted after the v1.4.0 cycle, where the AUR package sat a version behind
+because the step lived only in the maintainer's memory. **Do these in order** —
+each step depends on the one before it landing on `main`.
+
+1. **Feature PR** — the code, its tests, *and* its user-facing docs (README
+   feature bullet, keybindings row, any caveat it creates) plus the phase-log
+   entry. Docs ride with the feature, never with the release.
+2. **Release PR** (`chore(release): vX.Y.Z`) — branched off `main` *after* step 1
+   merges, or the changelog describes work the tag won't contain. Carries
+   **only**: `appVersion` in `view.go` (the single definition), the README
+   "What's New in vX.Y.Z" section, and the release phase-log entry.
+3. **Tag `main`** — `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z`.
+   Annotated, not lightweight: goreleaser reads the tag object. Pushing the tag
+   is the **only** trigger for `release.yml`. Confirm it points at the release
+   commit before pushing — untagging after a release job has run is messy.
+4. **Verify the published release** — don't trust the green tick alone:
+   - `go version -m <binary>` shows the `-X main.version=` ldflag. Phase 29
+     shipped a build where this silently did nothing, because Go ignores `-X`
+     on a missing symbol; it is worth re-checking every time.
+   - `sha256sum -c checksums.txt` on a downloaded artifact.
+   - The `.deb` contains `/usr/share/tailtui/tailtui.toml.tpl` — see the
+     `contrib/` packaging rule in Phase 31.
+5. **Bump the AUR package** — a *separate* git repo
+   (`aur@aur.archlinux.org:tailtui.git`), not automated, and invisible from
+   this one, which is exactly why it gets forgotten. In that checkout:
+   - `pkgver=X.Y.Z`, reset `pkgrel=1`, and replace `sha256sums` with
+     `curl -sL https://github.com/Phundahl/tailtui/archive/vX.Y.Z.tar.gz | sha256sum`.
+   - `makepkg --printsrcinfo > .SRCINFO` — the AUR rejects a push whose
+     `.SRCINFO` disagrees with the PKGBUILD.
+   - `makepkg -f` for a real build before pushing: it verifies the checksum,
+     compiles, and produces the package. A broken PKGBUILD reaches users
+     immediately, with no CI between you and them.
+   - Commit as `upgpkg: tailtui X.Y.Z-1`, then push.
+
+The AUR PKGBUILD builds **from source** with Arch's hardening flags, and is
+maintained by hand. goreleaser's `aurs:` block was considered and rejected: it
+generates a `-bin` package that installs the prebuilt binary, which is not what
+this package is, and automating it would mean either renaming the package or
+dropping the source build. Revisit only if a `-bin` package is wanted on its
+own merits.
 
 ## Documentation workflow (required)
 
