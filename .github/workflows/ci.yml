@@ -60,6 +60,30 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+  # Enforce the standing pseudonym rule (CLAUDE.md, Phase 26.2) mechanically.
+  # It was broken twice without review catching it: test fixtures pasted from
+  # live daemon output, and a commit authored with a real-name address.
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the commit-identity check can see the PR's commits;
+          # the default shallow clone would hide them.
+          fetch-depth: 0
+
+      - name: Privacy guard
+        env:
+          # On a PR, scan only what the PR adds. On a push to main there is no
+          # base to diff against, so the file checks still run and the identity
+          # check is skipped (an empty range leaves it unset).
+          PRIVACY_CHECK_COMMIT_RANGE: >-
+            ${{ github.event_name == 'pull_request'
+                && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
+                || '' }}
+        run: ./scripts/privacy-check.sh
+
   # Catch .goreleaser.yaml errors here rather than on a tag push, where the
   # only symptom is a failed release job after the tag already exists.
   goreleaser-config:
