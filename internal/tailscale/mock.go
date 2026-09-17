@@ -17,6 +17,11 @@ import (
 // mockEnabled is captured once at package load from $TAILTUI_MOCK=1.
 var mockEnabled = os.Getenv("TAILTUI_MOCK") == "1"
 
+// mockOperatorUser makes the demo tailnet look like operator setup has already
+// been done, so the mock dashboard shows the steady-state footer (no `[O]`
+// hint) rather than nagging about a one-time step that cannot be run in mock.
+var mockOperatorUser = CurrentUser()
+
 // MockEnabled reports whether the in-memory mock state is active.
 func MockEnabled() bool { return mockEnabled }
 
@@ -59,6 +64,7 @@ func newMockState() *mockData {
 			Online:           true,
 			NodeType:         types.NodeSubnetRouter,
 			AdvertisedRoutes: []string{"192.168.10.0/24", "192.168.20.0/24"},
+			OffersSSH:        true,
 		},
 		{
 			ID: "n-subnet2", Hostname: "home-nas", DNSName: "home-nas.tailtui.dev",
@@ -74,24 +80,30 @@ func newMockState() *mockData {
 			OS: types.OSLinux, TailscaleIP: "100.64.0.20",
 			Conn: types.ConnDirect, Tags: []string{"tag:server", "tag:prod"},
 			LastSeen: "Connected", Online: true, NodeType: types.NodeRegular,
+			OffersSSH: true,
 		},
 		{
 			ID: "n-db", Hostname: "db-cluster-prod", DNSName: "db-cluster-prod.tailtui.dev",
 			OS: types.OSLinux, TailscaleIP: "100.64.0.21",
 			Conn: types.ConnDirect, Tags: []string{"tag:database", "tag:prod"},
 			LastSeen: "Connected", Online: true, NodeType: types.NodeRegular,
+			OffersSSH: true,
 		},
 		{
 			ID: "n-mac", Hostname: "dev-macbook", DNSName: "dev-macbook.tailtui.dev",
 			OS: types.OSMacOS, TailscaleIP: "100.64.0.30",
 			Conn: types.ConnDirect, Tags: []string{"tag:dev"},
 			LastSeen: "Connected", Online: true, NodeType: types.NodeRegular,
+			OffersSSH: true,
 		},
 		{
 			ID: "n-laptop", Hostname: "field-laptop", DNSName: "field-laptop.tailtui.dev",
 			OS: types.OSLinux, TailscaleIP: "100.64.0.31",
 			Conn: types.ConnOffline, Tags: []string{"tag:laptop"},
 			LastSeen: "2h ago", Online: false, NodeType: types.NodeRegular,
+			// Offline AND SSH-capable on purpose: proves the list marker
+			// renders while `[s]` stays inert (the gating rule).
+			OffersSSH: true,
 		},
 	}
 	return &mockData{
@@ -113,6 +125,7 @@ func newMockState() *mockData {
 			RunSSH:          true,
 			AcceptDNS:       true,
 			AdvertiseRoutes: []string{"192.168.1.0/24", "10.0.0.0/16"},
+			OperatorUser:    mockOperatorUser,
 		},
 		connected: true,
 	}

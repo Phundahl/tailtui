@@ -199,10 +199,27 @@ func (m Model) renderFooter() string {
 	// exit-node service (the toggle is a no-op otherwise), matching the
 	// contextual-hint pattern used elsewhere.
 	exitHint := ""
-	if p, ok := m.selectedPeer(); ok && p.OffersExitNode {
-		exitHint = "  [x] Exit Node"
+	sshHint := ""
+	if p, ok := m.selectedPeer(); ok {
+		if p.OffersExitNode {
+			exitHint = "  [x] Exit Node"
+		}
+		// `[s]` works on any ONLINE peer (a plain sshd is still reachable), so
+		// that — not OffersSSH — is what gates the hint.
+		if p.Online {
+			sshHint = " [s] SSH"
+		}
 	}
-	left := styles.Dim.Render("[j/k] Nav  [/] Search  " + connect + exitHint + "  [O] Operator  [v] Logs")
+	// `[O]` is a ONE-TIME setup step, so it only earns footer space until it has
+	// been done: once prefs report this user as the tailscaled operator the hint
+	// retires, which is also what buys the room for `[s] SSH`. The failure mode
+	// is correct by construction — if the prefs read fails *because* we are not
+	// the operator, m.prefs is zero, the comparison fails, and the hint shows.
+	operatorHint := ""
+	if m.prefs.OperatorUser != currentUser() {
+		operatorHint = "  [O] Operator"
+	}
+	left := styles.Dim.Render("[j/k] Nav  [/] Search  " + connect + exitHint + sshHint + operatorHint + "  [v] Logs")
 	if m.searchFocused {
 		// In Input Mode, surface the otherwise-hidden search navigation shortcuts.
 		left = styles.Dim.Render("[↑↓ Ctrl+j/k] Nav   [Enter/Esc] Apply   type to filter")
@@ -346,6 +363,12 @@ func (m Model) renderDetails(lay layout) string {
 	}
 	if n := len(p.AdvertisedRoutes); n > 0 {
 		lines = append(lines, styles.Caution.Render(fmt.Sprintf("[e] %d advertised routes", n)))
+	}
+	// Green (capability available) rather than the routes hint's yellow (there is
+	// more to expand). Both can appear at once: 6 identity rows + 2 hints = 8,
+	// inside the pane's 9 inner rows, so the locked localNodeH still holds.
+	if p.OffersSSH && p.Online {
+		lines = append(lines, styles.Online.Render("[s] Tailscale SSH"))
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	return styles.Pane("PEER DETAILS: "+p.Hostname, body, lay.rightW, lay.detailsH, false)

@@ -31,35 +31,10 @@ func (m Model) routingItemCount() int {
 	return 1 + len(m.routingRoutes)
 }
 
-// newRoutingInput builds the CIDR text editor, themed to blend into the modal
-// Surface.
-//
-// The "black box" (Phase 23.2): a textinput with a Placeholder set renders, when
-// empty, via placeholderView, which fills the remainder of the field's Width
-// with RAW unstyled spaces — a default-background (near-black) block that no
-// outer Surface wrap can recolor (the spaces sit mid-line, after a reset). With
-// NO placeholder the main render path pads instead with TextStyle, which carries
-// the Surface background, so every cell of the field is Surface. The prompt label
-// above the field already shows the "(e.g., 192.168.1.0/24)" example, so dropping
-// the in-field placeholder loses nothing.
-//
-// The cursor must be a clearly VISIBLE bright block. bubbles/cursor draws its
-// visible cell with Style.Reverse(true), which swaps fg/bg at display time — so
-// the DISPLAYED background is Style's Foreground. We therefore set Foreground to
-// Primary (becomes the bright block background) and Background to Bg (becomes the
-// glyph color), giving a solid Primary block with a dark glyph — never invisible
-// (the Phase 23.2 fg-Surface camouflage) and never a black block. Cursor.TextStyle
-// keeps the blink-"off" phase rendering as normal text on the Surface.
-func newRoutingInput() textinput.Model {
-	ti := textinput.New()
-	ti.Prompt = "> "
-	ti.CharLimit = 64
-	ti.PromptStyle = styles.ModalAccent
-	ti.TextStyle = styles.ModalText
-	ti.Cursor.TextStyle = styles.ModalText
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.Bg)
-	return ti
-}
+// newRoutingInput builds the CIDR text editor for the Routing modal. The
+// styling contract (and the reasoning behind every line of it) lives on
+// newModalInput in overlay.go, shared with the SSH launcher's username editor.
+func newRoutingInput() textinput.Model { return newModalInput(64) }
 
 // openRouting transitions to the Routing Management modal, snapshotting the live
 // advertised routes from prefs into the editable working copy (the caller
@@ -300,7 +275,7 @@ func (m Model) updateRoutingConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case "c", "C":
 		// Copy the command to the clipboard; stay in the modal.
-		return m, copyRoutingCmd(m.routingCommandString())
+		return m, copyCmd(clipboardRouting, m.routingCommandString())
 	case "esc", "q":
 		// Back to the list without applying.
 		m.state = stateRouting

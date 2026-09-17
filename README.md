@@ -92,6 +92,12 @@ tailTUI grew from a read-only dashboard into a full configuration tool:
 
 ## Features
 
+- **SSH without leaving the TUI.** Highlight a node, press `s`, and a launcher
+  shows the target, an editable username, and the *exact* command about to
+  run. `Enter` hands your terminal to `tailscale ssh` — auth, MagicDNS
+  resolution, and host-key verification all handled — and the TUI restores
+  itself when the session ends. `c` copies the command instead. Nodes running
+  the Tailscale SSH server are marked in the list.
 - **Live, multi-row latency graphing.** Select any peer and watch a real-time
   vertical bar chart of round-trip latency (`tailscale ping`), color-graded by
   severity, with live MIN / AVG / MAX. The chart grows to fill the pane.
@@ -139,6 +145,11 @@ self-contained executable and runs identically on **any modern Linux
 distribution** — Ubuntu, Debian, Fedora, Arch, NixOS, openSUSE, Alpine — with
 no packaging tweaks, service hooks, or distro-specific patches. If
 `tailscale` is on your `PATH` and the daemon is running, `tailTUI` works.
+
+Two features reach for an external tool only when you actually use them: the
+SSH launcher (`s`) runs `tailscale ssh`, which wraps your **system `ssh`
+client**, and the clipboard copies shell out to `wl-copy` / `xclip` / `pbcopy`.
+Neither is needed to start, browse, or manage the tailnet.
 
 ### Arch Linux (AUR)
 
@@ -206,7 +217,8 @@ curl -fsSL -o ~/.config/omarchy/themed/tailtui.toml.tpl \
 
 **Requirements:** Go 1.26+ (only to build from source), a working
 [Tailscale](https://tailscale.com) install (the `tailscale` CLI on your
-`PATH`, daemon running), and a terminal with a
+`PATH`, daemon running), an `ssh` client if you want the SSH launcher, and a
+terminal with a
 [Nerd Font](https://www.nerdfonts.com/) for the node glyphs. TrueColor
 support is recommended but not required — the theme degrades gracefully to
 ANSI on 256-color terminals.
@@ -229,6 +241,7 @@ ANSI on 256-color terminals.
 | `Enter` / `Esc` | Apply the filter (blur the box); `Esc` again clears it |
 | `c` | Connect / disconnect the local node (`tailscale up`/`down`) |
 | `x` | Toggle the highlighted peer as the active exit node (exit-capable peers only) |
+| `s` | **SSH launcher** — preview and run `tailscale ssh` against the highlighted peer (any online peer) |
 | `e` | Expand a subnet router's advertised routes |
 | `v` | Open / close the full event-log overlay |
 | `l` | Account management — switch · add · remove · logout |
@@ -258,6 +271,14 @@ the underlying Tailscale call genuinely requires it:
   throughout: type your sudo password (and, for `add`, complete the
   `tailscale login` auth URL), and the TUI restores itself automatically when
   the command finishes.
+
+- **SSH needs no sudo at all** — the `[s]` launcher runs `tailscale ssh` as
+  you. What it *does* need is on the far end: the target must be running the
+  Tailscale SSH server (`tailscale set --ssh`, or `S` → *Run Tailscale SSH*
+  on that node), and your tailnet's ACL policy must grant you an `ssh` rule
+  for it. tailTUI marks nodes advertising the SSH server, but the ACL check
+  happens on connect and cannot be predicted from the client — so a permitted
+  node and a refused connection can both look the same until you try.
 
 If `tailTUI` is launched from an unprivileged session and the daemon refuses
 even the background profile-list read, the Account Management modal renders
@@ -352,7 +373,8 @@ without 24-bit support.
 
 `tailTUI` is in active development. The node list, details, latency graphs,
 routes, logs, exit-node control, connection toggle, account management, and
-advanced preference toggles are all wired to live Tailscale data. The routing
+advanced preference toggles, and the SSH launcher are all wired to live
+Tailscale data. The routing
 management overlay reads live advertised-route state, stages exit-node /
 subnet-route edits, and applies them through a transparent "Command Room"
 confirmation (`tailscale set`, with clipboard copy). See the Roadmap for what's
@@ -372,7 +394,8 @@ Parked, upcoming features for future development cycles:
   production server environments, so tagged nodes can be provisioned and audited
   without leaving the TUI.
 
-Smaller parked items: in-UI Tailscale SSH and ping-as-action.
+Smaller parked items: ping-as-action, and surfacing the tailnet's SSH
+capability grant as an up-front warning in the launcher.
 
 ## Acknowledgments
 
