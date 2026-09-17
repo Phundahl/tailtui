@@ -31,6 +31,7 @@ const (
 	stateSettings
 	stateRouting
 	stateRoutingConfirm
+	stateSSH
 )
 
 // maxLogEntries caps the in-memory log ring (FIFO) so a long-running session
@@ -108,6 +109,25 @@ type Model struct {
 	// routingCopied flashes a "Copied!" indicator in the Command Room confirmation
 	// overlay after the command is copied to the clipboard. Reset on entry/exit.
 	routingCopied bool
+
+	// SSH launcher modal state (Phase 34).
+	//
+	// sshPeer is a SNAPSHOT of the target taken when the modal opens —
+	// deliberately unlike the routing modal's prefsMsg re-snapshot, because a
+	// background status poll must never be able to swap the machine you are
+	// about to shell into out from under you.
+	//
+	// sshUser is the username editor. It is BLURRED in nav mode and focused
+	// only in sshInputMode, so `[c]` can mean COPY rather than typing a literal
+	// "c" (see ssh.go for the full rationale). sshUserErr red-flashes a
+	// rejected entry; sshLastUser remembers the confirmed username for the rest
+	// of the session; sshCopied flashes the clipboard indicator.
+	sshPeer      types.Peer
+	sshUser      textinput.Model
+	sshInputMode bool
+	sshUserErr   bool
+	sshLastUser  string
+	sshCopied    bool
 
 	// fetchErr holds the last `tailscale status` failure (nil when healthy); it
 	// surfaces as an error line in the logs pane. The last good data stays on

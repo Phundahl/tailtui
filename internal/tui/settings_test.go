@@ -42,7 +42,7 @@ func assertFlush(t *testing.T, view string, w, h int) {
 }
 
 // Phase 20: PEER DETAILS stays locked to LOCAL_NODE height so the top panes'
-// bottom borders remain flush after stacking the new [s] action label.
+// bottom borders remain flush after stacking the [S] action label.
 func TestLayoutSymmetryFlush(t *testing.T) {
 	lay := computeLayout(120, 40)
 	if lay.localH != lay.detailsH {
@@ -59,21 +59,44 @@ func TestLayoutSymmetryFlush(t *testing.T) {
 	}
 }
 
-// Phase 20.1: Advanced Settings is bound to uppercase [S] (shift+s); lowercase
-// `s` is reserved for the future SSH-as-action and must be a no-op.
+// Phase 20.1 / 34: Advanced Settings is bound to uppercase [S] (shift+s).
+// Lowercase `s` now belongs to the SSH launcher and must NEVER open Advanced
+// Settings — that case-sensitivity is the invariant this test guards. The SSH
+// behavior itself (opens on an online peer, inert otherwise) is covered in
+// ssh_test.go; here the peer list is empty, so `s` has no target and is a no-op.
 func TestSettingsHotkeyIsUppercase(t *testing.T) {
-	m := newReadyModel(t, 120, 40)
+	m := newReadyModel(t, 120, 40) // empty peer list → no SSH target
 
-	m2, _ := m.Update(key("s")) // lowercase: reserved, ignored
+	m2, _ := m.Update(key("s")) // lowercase: the SSH launcher, not settings
 	m = m2.(Model)
+	if m.state == stateSettings {
+		t.Fatalf("lowercase s opened Advanced Settings; it belongs to the SSH launcher")
+	}
 	if m.state != stateMain {
-		t.Fatalf("lowercase s opened a modal (state=%v); it must be reserved for SSH", m.state)
+		t.Fatalf("lowercase s with no peer selected opened %v, want stateMain", m.state)
 	}
 
 	m2, _ = m.Update(key("S")) // uppercase: opens settings
 	m = m2.(Model)
 	if m.state != stateSettings {
 		t.Fatalf("uppercase S did not open settings (state=%v)", m.state)
+	}
+}
+
+// Phase 34: the case-sensitivity guard above only bites when a peer IS
+// selected — with an empty list lowercase `s` would be inert for the wrong
+// reason, and the test would quietly stop guarding anything.
+func TestSettingsHotkeyIsUppercaseWithPeerSelected(t *testing.T) {
+	m := newModelWithPeers(t, 120, 40, sshTestPeer("srv-web-01", true, true, false))
+
+	m2, _ := m.Update(key("s"))
+	if got := m2.(Model).state; got != stateSSH {
+		t.Fatalf("lowercase s opened %v, want the SSH launcher", got)
+	}
+
+	m2, _ = m.Update(key("S"))
+	if got := m2.(Model).state; got != stateSettings {
+		t.Fatalf("uppercase S opened %v, want Advanced Settings", got)
 	}
 }
 

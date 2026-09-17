@@ -101,6 +101,12 @@ type Peer struct {
 	// as an exit node and can therefore be selected with `x`.
 	OffersExitNode bool
 
+	// OffersSSH is a capability flag: true when this node runs the Tailscale
+	// SSH server (the daemon reports sshHostKeys for it). It is ADVISORY ONLY
+	// — it says the server is there, never that the tailnet ACL permits you to
+	// use it, because per-peer capabilities are not exposed by the CLI.
+	OffersSSH bool
+
 	// IsActiveExitNode is true when the local node is currently routing all
 	// traffic through this peer. At most one peer should have this set, and
 	// only nodes with OffersExitNode == true may have it.
@@ -171,6 +177,12 @@ type Prefs struct {
 	// this node advertises (those defaults stripped out).
 	AdvertiseExitNode bool
 	AdvertiseRoutes   []string
+
+	// OperatorUser is the OS user configured as the tailscaled operator (wire:
+	// OperatorUser). It is not a `tailscale set --<flag>` toggle like the
+	// fields above — it is read-only here, and exists so the UI can hide the
+	// one-time `[O]` operator-setup hint once setup has actually happened.
+	OperatorUser string
 }
 
 // Account is a Tailscale login the user can switch between (accounts modal).

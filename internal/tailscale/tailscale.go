@@ -14,7 +14,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	osuser "os/user"
 	"regexp"
 	"sort"
 	"strconv"
@@ -130,6 +132,7 @@ type prefsWire struct {
 	RunSSH                 bool     // ssh
 	ShieldsUp              bool     // shields-up
 	AdvertiseRoutes        []string // subnet CIDRs this node advertises (+ exit defaults)
+	OperatorUser           string   // OS user configured as the tailscaled operator
 }
 
 // GetPrefs reads the live local-node preferences via `tailscale debug prefs`
@@ -166,6 +169,7 @@ func GetPrefs(ctx context.Context) (types.Prefs, error) {
 		ShieldsUp:              w.ShieldsUp,
 		AdvertiseExitNode:      exit,
 		AdvertiseRoutes:        advertisedRoutes(w.AdvertiseRoutes),
+		OperatorUser:           w.OperatorUser,
 	}, nil
 }
 
@@ -201,6 +205,46 @@ func AdvertiseArgs(exitNode bool, routes []string) []string {
 // "Command Room" confirmation overlay — exactly what SetRouting executes.
 func AdvertiseCommandString(exitNode bool, routes []string) string {
 	return "tailscale " + strings.Join(AdvertiseArgs(exitNode, routes), " ")
+}
+
+// CurrentUser resolves the local username via os/user.Current (a getuid()
+// syscall — authoritative regardless of how the program was launched), falling
+// back to $USER only if that fails. Going through Current avoids edge cases
+// where $USER is empty or inherited from a parent context (sudo, su,
+// daemonized launchers) and would otherwise produce a wrong value.
+func CurrentUser() string {
+	if u, err := osuser.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
+}
+
+// SSHTarget builds the `[user@]host` token for `tailscale ssh`. Trailing dots
+// are trimmed here as well as in mapPeers: this function is pure, it is what
+// both the preview and the argv consume, and a FQDN straight off the wire
+// ("laptop.tailnet.ts.net.") is exactly what a future caller would hand it.
+// An empty user yields a bare host, letting ssh apply its own default.
+func SSHTarget(user, host string) string {
+	host = strings.TrimSuffix(strings.TrimSpace(host), ".")
+	if user = strings.TrimSpace(user); user == "" {
+		return host
+	}
+	return user + "@" + host
+}
+
+// SSHArgs is the argv handed to the `tailscale` binary for an interactive
+// session. No shell is involved anywhere in this path (exec.Command takes an
+// argv), so a hostile user or host string cannot inject a command.
+func SSHArgs(user, host string) []string {
+	return []string{"ssh", SSHTarget(user, host)}
+}
+
+// SSHCommandString renders the copy-pasteable command previewed in the SSH
+// launcher. Built FROM SSHArgs, exactly as AdvertiseCommandString is built
+// from AdvertiseArgs, so "the preview is the command" is structurally true
+// rather than a convention two functions must independently honour.
+func SSHCommandString(user, host string) string {
+	return "tailscale " + strings.Join(SSHArgs(user, host), " ")
 }
 
 // SetRouting applies the advertised exit-node / subnet-route state via
@@ -270,6 +314,15 @@ type node struct {
 	ExitNodeOption bool // this node *offers* exit-node service
 	Active         bool
 	LastSeen       time.Time
+
+	// SSHHostKeys is populated ONLY when the peer runs the Tailscale SSH
+	// server; absent means it is not offering SSH. Tagged explicitly because,
+	// unlike every other field here, the wire key is lowerCamel and does not
+	// read as the Go name — encoding/json's case-insensitive match would cover
+	// it, but relying on that for the one odd key out is how it quietly breaks.
+	// If upstream ever renames the key this fails soft: the capability marker
+	// disappears, and `[s]` still works on any online peer.
+	SSHHostKeys []string `json:"sshHostKeys"`
 }
 
 type user struct {
@@ -327,6 +380,7 @@ func mapPeers(s *status) []types.Peer {
 			NodeType:         nodeType(n.ExitNodeOption, routes),
 			AdvertisedRoutes: routes,
 			OffersExitNode:   n.ExitNodeOption,
+			OffersSSH:        len(n.SSHHostKeys) > 0,
 			IsActiveExitNode: n.ExitNode,
 		})
 	}
