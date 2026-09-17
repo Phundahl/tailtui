@@ -29,6 +29,26 @@ for the opposite workflow:
   drop you to the shell only when *they* need to (to paste an auth URL), then
   restore the UI automatically.
 
+## What's New in v1.4.0
+
+- **SSH straight from the node list.** Highlight a peer, press `s`, and a
+  launcher shows the target, an editable username, and the *exact* command
+  about to run. `Enter` hands your terminal to `tailscale ssh` — MagicDNS
+  resolution, host-key verification and auth all handled by the wrapper — and
+  `tailTUI` restores itself the moment the session ends. `c` copies the command
+  instead of running it.
+- **Nodes running Tailscale SSH are marked.** The peer list flags which nodes
+  advertise an SSH server, read live from the daemon at no extra cost. The
+  launcher still opens on *any* online peer, though — a node without Tailscale
+  SSH may well be reachable through its own `sshd`, and the modal tells you
+  which case you are in before anything runs.
+- **The username is remembered for the session.** It starts as your local user
+  and, once you change it, stays changed until you quit — so a non-default
+  remote account is typed once, not once per connection.
+- **`[O] Operator` retires once it is done.** Operator setup is a one-time
+  step, so the footer hint now disappears after it has been granted, freeing
+  the space for `[s] SSH`.
+
 ## What's New in v1.3.0
 
 - **Live theme switching.** Switch your desktop theme and a running `tailTUI`
