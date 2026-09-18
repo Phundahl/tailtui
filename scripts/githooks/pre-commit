@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Repo-level pre-commit: the project's own structural privacy checks.
+#
+# Invoked by the global hook in ~/.config/git/hooks (core.hooksPath), which runs
+# the machine-local checks first and then delegates here. It also works standalone
+# if a contributor points core.hooksPath at this directory instead.
+set -uo pipefail
+root="$(git rev-parse --show-toplevel)"
+exec "$root/scripts/privacy-check.sh" --staged

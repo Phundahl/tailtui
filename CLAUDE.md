@@ -260,8 +260,7 @@ Adopted in the v1.2.0 cycle; `main` is a published, public branch.
 ## Privacy guard (enforced in CI)
 
 The pseudonym rule above is enforced mechanically rather than left to review.
-`scripts/privacy-check.sh` runs as a CI job on every PR and push, and fails the
-build on:
+`scripts/privacy-check.sh` fails on:
 
 1. absolute `/home/<user>` paths;
 2. tailnet MagicDNS names that aren't obviously fictional (`example-tailnet`,
@@ -275,6 +274,15 @@ denylist of real values** — a guard that named what it hides would leak it
 itself, which is also why the script excludes itself from its own scan. And
 check 4 covers **commit metadata**, which a scan of the working tree cannot see
 at all: authorship is as public as file content and needs its own check.
+
+**Where it runs, and why the order matters.** `scripts/githooks/{pre-commit,pre-push}`
+run it locally (`--staged` / `--commits`), and the `privacy` CI job runs it again
+as a backstop. **The local run is the one that prevents anything** — CI only sees
+a branch once it is already on the remote, and GitHub retains pull-request refs
+permanently, so a check that first runs in CI cannot stop something becoming
+public. Activate the local hooks with
+`git config core.hooksPath scripts/githooks` (a machine-wide `core.hooksPath`
+that delegates here works too).
 
 **Test fixtures come from `internal/tailscale/mock.go`'s fictional vocabulary,
 never from live daemon output.** The mock package exists precisely so that
