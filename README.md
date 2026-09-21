@@ -19,15 +19,16 @@ The official `tailscale` CLI is excellent, but managing a large tailnet means
 re-running `status`, squinting at JSON, and copy-pasting IPs. `tailTUI` is built
 for the opposite workflow:
 
-- **Built for speed and flow-state.** Everything is one keystroke away. No menus,
-  no mouse, no context switching. The whole network is on one screen, refreshed
-  live.
-- **At home in a tiling window manager.** A sharp, flush, single-line-bordered
-  layout that snaps cleanly into any pane and stays flush at any size — no
-  wasted space, no wrapping, no rounded-corner fluff.
-- **Never leaves the terminal.** Auth flows, operator setup, and login prompts
-  drop you to the shell only when *they* need to (to paste an auth URL), then
-  restore the UI automatically.
+- **Built for speed and flow-state.** Single-key actions, no mouse anywhere, and
+  `/` to fuzzy-filter a large tailnet down to the node you want — with nodes,
+  details, live latency and the event log all on one screen, refreshed every few
+  seconds.
+- **At home in a tiling window manager.** Sharp single-line borders and a layout
+  that renders to exactly the terminal's width and height, from 72×24 up — no
+  rounded corners, and no ragged edges when you resize or re-tile.
+- **Never leaves the terminal.** Auth flows, sudo prompts and SSH sessions take
+  the real terminal when they need it, then the UI restores itself the moment
+  they exit.
 
 ## What's New in v1.4.0
 
