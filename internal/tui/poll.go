@@ -218,6 +218,23 @@ func copyCmd(kind clipboardKind, text string) tea.Cmd {
 	}
 }
 
+// serveMsg carries the result of a `tailscale serve status --json` fetch.
+type serveMsg struct {
+	ports []types.ServePort
+	err   error
+}
+
+// fetchServeCmd reads the live Serve/Funnel configuration off the UI thread.
+// An unconfigured node is an empty list, not an error.
+func fetchServeCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		ports, err := tailscale.ServeStatus(ctx)
+		return serveMsg{ports: ports, err: err}
+	}
+}
+
 // accountsMsg carries the result of a `tailscale switch --list` fetch.
 type accountsMsg struct {
 	accounts []types.Account

@@ -202,6 +202,8 @@ func (m Model) resizeOverlay() Model {
 		m.routingInput.Width = clampInputWidth(w)
 		restyleModalInput(&m.routingInput)
 		content = m.routingBody(w)
+	case stateServe:
+		content = m.serveBody(w)
 	case stateLogs:
 		lw := logOverlayWidth(m.width) // wider than the other modals
 		content = logBody(m.logs, lw)
@@ -337,6 +339,13 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// [a] adds a route (input mode), [d] removes one. All edits are local.
 		// Esc/q (handled above) close it.
 		return m.updateRoutingList(key)
+	case stateServe:
+		// Read-only this phase: navigation only. Every other key is swallowed
+		// so nothing falls through to the peer list behind the modal.
+		if nm, handled := m.updateServeList(key); handled {
+			return nm.resizeOverlay(), nil
+		}
+		return m, nil
 	}
 
 	// Help / routes: forward scroll keys to the viewport.
@@ -392,6 +401,9 @@ func (m Model) renderOverlay(base string) string {
 		hint = "[Esc] Back to List"
 	case stateAccounts:
 		title = "ACCOUNT_MANAGEMENT"
+		hint = "[Esc] Close"
+	case stateServe:
+		title = "SERVE_AND_FUNNEL"
 		hint = "[Esc] Close"
 	case stateRouting:
 		title = "ROUTING_MANAGEMENT"
@@ -743,7 +755,6 @@ func helpBody(w int) string {
 	var lines []string
 	lines = append(lines, group("NAVIGATION", [][2]string{
 		{"Move Selection Up / Down", "j / k"},
-		{"Switch Pane Left / Right", "h / l"},
 		{"Jump to Top / Bottom", "g / G"},
 	})...)
 	lines = append(lines, group("SEARCH / FILTER", [][2]string{
@@ -757,6 +768,7 @@ func helpBody(w int) string {
 		{"Toggle Exit Node", "x"},
 		{"Expand Subnet Routes", "e"},
 		{"SSH to Peer", "s"},
+		{"Serve & Funnel", "F"},
 		{"Operator Setup (sudo)", "O"},
 	})...)
 	lines = append(lines, group("GLOBAL", [][2]string{

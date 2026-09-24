@@ -198,3 +198,58 @@ type LogEntry struct {
 	Level   string // INFO, DEBUG, WARN, ERROR
 	Message string
 }
+
+// ServeKind classifies what a served path points at. It exists so the view can
+// switch on a type rather than string-matching the target — the same reason
+// ConnType and NodeType exist. The three kinds are exactly what the daemon's
+// serve config can hold, verified against live configs.
+type ServeKind int
+
+const (
+	// ServeProxy forwards to a local server, e.g. "http://127.0.0.1:3000".
+	ServeProxy ServeKind = iota
+	// ServeFile serves a filesystem path — a directory or a single file.
+	// Configuring one of these requires root (the daemon refuses otherwise),
+	// which is Tailscale's own guard against casually publishing a directory.
+	ServeFile
+	// ServeText serves a literal string.
+	ServeText
+)
+
+// Icon returns the leading glyph distinguishing the three kinds in the list.
+func (k ServeKind) Icon() string {
+	switch k {
+	case ServeFile:
+		return "▤"
+	case ServeText:
+		return "≡"
+	default:
+		return "⇢"
+	}
+}
+
+// ServePath is one path mounted on a listening port, and what it resolves to.
+type ServePath struct {
+	// Path is the mount point as the daemon stores it. Note the daemon
+	// normalises by TARGET SHAPE: a directory is stored with a trailing slash
+	// ("/docs/"), a single file or text without ("/motd"). Render URLs from
+	// this verbatim — the two forms are not interchangeable for a directory.
+	Path   string
+	Kind   ServeKind
+	Target string // proxy URL, filesystem path, or the literal text
+}
+
+// ServePort is a listening port and everything mounted on it.
+//
+// Port is the port TAILSCALE listens on (443 by default), NOT the port of the
+// local service — `tailscale serve 3000` produces Port 443 with a Target of
+// "http://127.0.0.1:3000". Conflating the two is the easiest mistake here.
+//
+// Funnel is per-port, not per-path: it is keyed by host:port in the daemon's
+// config, so enabling it exposes EVERY path in Paths to the public internet.
+type ServePort struct {
+	Port   int
+	HTTPS  bool
+	Funnel bool
+	Paths  []ServePath
+}

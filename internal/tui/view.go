@@ -37,7 +37,7 @@ const (
 	headerHeight = 1
 	footerHeight = 1
 	logsHeight   = 5  // TERMINAL_LOGS pane (border + tail lines)
-	localNodeH   = 11 // LOCAL_NODE pane height (border + fields + Connect + grouped Settings/Routing)
+	localNodeH   = 12 // LOCAL_NODE pane height (border + fields + Serve state + Connect + grouped Settings/Routing/Serve)
 	minLatencyH  = 4  // LATENCY HISTORY pane never shrinks below this
 	gutter       = 1  // column gap between the left and right columns
 	minWidth     = 72
@@ -243,6 +243,7 @@ func (m Model) renderLocalNode(lay layout) string {
 		styles.Label.Render("Exit State:") + " " + m.renderExitState(),
 		styles.Label.Render("Exit:") + " " + m.renderExitValue(),
 		styles.Label.Render("Exit Latency:") + " " + m.renderExitLatency(),
+		styles.Label.Render("Serve:") + " " + m.renderServeState(),
 		m.renderConnectButton(cw),
 		m.renderActionButtons(cw),
 	}
@@ -273,10 +274,40 @@ func (m Model) renderConnectButton(cw int) string {
 // with spacing between them. [S] (shift+s) opens the settings modal and [R]
 // (shift+r) the routing modal; the lowercase keys remain reserved. Keeping both
 // on one row keeps the LOCAL_NODE pane from looking bottom-heavy.
+// renderServeState summarises Serve/Funnel in one LOCAL_NODE row.
+//
+// The point of putting it on the dashboard rather than only inside the modal
+// is that the real hazard is not mis-configuring a funnel — it is FORGETTING
+// one is live. A public share therefore gets the only red on the dashboard,
+// naming the port so it is actionable at a glance.
+func (m Model) renderServeState() string {
+	if len(m.serve) == 0 {
+		return styles.Dim.Render("None")
+	}
+	paths, public := 0, []string{}
+	for _, p := range m.serve {
+		paths += len(p.Paths)
+		if p.Funnel {
+			public = append(public, fmt.Sprintf(":%d", p.Port))
+		}
+	}
+	label := fmt.Sprintf("%d paths", paths)
+	if paths == 1 {
+		label = "1 path"
+	}
+	if len(public) == 0 {
+		return styles.Value.Render(label) + styles.Dim.Render(" · tailnet only")
+	}
+	return styles.Value.Render(label) + "  " +
+		styles.Alert.Render("◉ PUBLIC "+strings.Join(public, " "))
+}
+
 func (m Model) renderActionButtons(cw int) string {
-	row := styles.Button.Render("[S] Advanced Settings") +
-		styles.Value.Render("    ") +
-		styles.Button.Render("[R] Routing")
+	row := styles.Button.Render("[S] Settings") +
+		styles.Value.Render("   ") +
+		styles.Button.Render("[R] Routing") +
+		styles.Value.Render("   ") +
+		styles.Button.Render("[F] Serve")
 	return lipgloss.PlaceHorizontal(cw, lipgloss.Center, row)
 }
 
