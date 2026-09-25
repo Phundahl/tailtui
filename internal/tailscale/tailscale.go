@@ -213,6 +213,12 @@ func AdvertiseCommandString(exitNode bool, routes []string) string {
 // where $USER is empty or inherited from a parent context (sudo, su,
 // daemonized launchers) and would otherwise produce a wrong value.
 func CurrentUser() string {
+	// Mock mode renders a fictional persona end to end, and this string is
+	// RENDERED — the SSH launcher pre-fills it — so identity belongs in the
+	// fixture exactly like the node list and the accounts do.
+	if mockEnabled {
+		return mockUser
+	}
 	if u, err := osuser.Current(); err == nil && u.Username != "" {
 		return u.Username
 	}
