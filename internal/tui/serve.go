@@ -167,14 +167,18 @@ func serveURL(host string, port int, path string) string {
 func (m Model) serveBody(w int) string {
 	var lines []string
 
+	// The empty state must NOT return early: it still needs the keymap (so the
+	// add key is discoverable) and the input field (so pressing it renders).
+	// Returning here made the modal look read-only on any node that happens to
+	// be sharing nothing — which is most of them.
 	if len(m.serve) == 0 {
 		lines = append(lines,
 			modalLine(w, styles.ModalDim.Render("  No services are being shared.")),
 			modalLine(w, ""),
 			modalLine(w, styles.ModalText.Render("  Serve shares a local service with your tailnet over HTTPS.")),
 			modalLine(w, styles.ModalText.Render("  Funnel additionally exposes it to the public internet.")),
+			modalLine(w, ""),
 		)
-		return strings.Join(lines, "\n")
 	}
 
 	host := m.local.Hostname
@@ -242,6 +246,8 @@ func (m Model) serveBody(w int) string {
 		}
 		lines = append(lines, modalDivider(w),
 			gridLine(w, accountKey("ENTER", "CONFIRM", false), accountKey("ESC", "CANCEL", false)))
+	} else if len(m.serve) == 0 {
+		lines = append(lines, modalLine(w, accountKey("A", "ADD A SERVICE", false)))
 	} else {
 		lines = append(lines,
 			gridLine(w, accountKey("J/K", "NAVIGATE", false), accountKey("A", "ADD", false)),

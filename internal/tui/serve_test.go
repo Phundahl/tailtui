@@ -110,12 +110,53 @@ func TestServeAllKindsRender(t *testing.T) {
 	}
 }
 
+// The empty state is the state MOST nodes are in, so it has to advertise how
+// to leave it. An earlier version returned before rendering the keymap, which
+// made the modal look read-only on any node sharing nothing.
 func TestServeEmptyState(t *testing.T) {
 	m := openServeModal(t, 120, 40, nil)
 	view := m.View()
 	assertFlush(t, view, 120, 40)
 	if !strings.Contains(view, "No services are being shared") {
-		t.Fatalf("empty state missing:\n%s", view)
+		t.Fatalf("empty state message missing:\n%s", view)
+	}
+	if !strings.Contains(view, "ADD") {
+		t.Fatalf("empty state must advertise the add key, or the modal looks read-only:\n%s", view)
+	}
+}
+
+// Pressing add on an empty config must actually render the editor. The early
+// return meant input mode was entered but the field was never drawn.
+func TestServeAddFromEmptyStateRendersInput(t *testing.T) {
+	m := openServeModal(t, 120, 40, nil)
+	m2, _ := m.Update(key("a"))
+	m = m2.(Model)
+	if !m.serveInputMode {
+		t.Fatalf("[a] did not enter input mode on an empty config")
+	}
+	view := m.View()
+	assertFlush(t, view, 120, 40)
+	if !strings.Contains(view, "Share what?") {
+		t.Fatalf("target editor not rendered on an empty config:\n%s", view)
+	}
+	if !strings.Contains(view, "CONFIRM") {
+		t.Fatalf("input keymap missing on an empty config:\n%s", view)
+	}
+}
+
+// And the typed target must reach the Command Room from the empty state too.
+func TestServeAddFromEmptyStateReachesConfirm(t *testing.T) {
+	m := openServeModal(t, 120, 40, nil)
+	m2, _ := m.Update(key("a"))
+	m = m2.(Model)
+	m.serveInput.SetValue("3000")
+	m3, _ := m.Update(key("enter"))
+	m = m3.(Model)
+	if m.state != stateServeConfirm {
+		t.Fatalf("Enter did not reach the Command Room (state=%v)", m.state)
+	}
+	if m.servePending.port != 443 || m.servePending.target != "3000" {
+		t.Fatalf("staged action wrong: %+v", m.servePending)
 	}
 }
 
