@@ -802,5 +802,84 @@ func TestServeFooterSurvivesAShortTerminal(t *testing.T) {
 	}
 }
 
+// [r] re-reads the daemon. The automatic refetch after an action is already
+// authoritative, but it is invisible — this is the key that proves a delete
+// really landed, and the only thing that catches a change made elsewhere.
+func TestServeRefreshKeyRefetches(t *testing.T) {
+	m := openServeModal(t, 120, 40, servePorts())
+	m2, cmd := m.Update(key("r"))
+	got := m2.(Model)
+	if cmd == nil {
+		t.Fatal("[r] issued no fetch")
+	}
+	if got.state != stateServe {
+		t.Fatalf("[r] left the modal (state=%v)", got.state)
+	}
+	if msg, ok := cmd().(serveMsg); !ok || !msg.manual {
+		t.Fatalf("[r] did not issue a manual fetch: %#v", cmd())
+	}
+}
+
+// A refresh nobody can see is not a receipt. Only the manual one logs, though:
+// startup, open and post-action fetches would otherwise narrate themselves.
+func TestServeManualRefreshLogsASummary(t *testing.T) {
+	m := newReadyModel(t, 120, 40)
+	before := len(m.logs)
+
+	m = mustModel(m.Update(serveMsg{ports: servePorts()}))
+	if len(m.logs) != before {
+		t.Fatalf("an automatic fetch logged %q", m.logs[len(m.logs)-1].Message)
+	}
+
+	m = mustModel(m.Update(serveMsg{ports: servePorts(), manual: true}))
+	if len(m.logs) != before+1 {
+		t.Fatal("a manual refresh left no receipt in the log ring")
+	}
+	last := m.logs[len(m.logs)-1]
+	if last.Level != "INFO" || !strings.Contains(last.Message, "2 ports") ||
+		!strings.Contains(last.Message, "1 public") {
+		t.Fatalf("receipt does not state what was found: %+v", last)
+	}
+}
+
+func TestServeSummaryStatesTheCounts(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ports []types.ServePort
+		want  string
+	}{
+		{"nothing", nil, "nothing is shared"},
+		{"all private", []types.ServePort{{Port: 443, Paths: []types.ServePath{{Path: "/"}}}},
+			"1 port, 1 path, none public"},
+		{"with a funnel", servePorts(), "2 ports, 4 paths, 1 public"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := serveSummary(tc.ports); got != tc.want {
+				t.Fatalf("serveSummary = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The key has to be advertised in both states — the empty one most of all,
+// since "nothing is shared" is also what a stale view looks like.
+func TestServeRefreshIsAdvertised(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ports []types.ServePort
+	}{
+		{"with shares", servePorts()},
+		{"empty", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := openServeModal(t, 120, 40, tc.ports).View()
+			if !strings.Contains(v, "[R] REFRESH") {
+				t.Fatal("the refresh key is not advertised")
+			}
+			assertFlush(t, v, 120, 40)
+		})
+	}
+}
+
 // mustModel unwraps the tea.Model an Update returns.
 func mustModel(m tea.Model, _ tea.Cmd) Model { return m.(Model) }

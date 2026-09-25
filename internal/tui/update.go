@@ -156,6 +156,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == stateServe {
 			m = m.resizeOverlay()
 		}
+		if msg.manual {
+			// State the counts, not "refreshed": a receipt is only worth
+			// anything if it says what was found.
+			m = m.appendLog("INFO", "serve config: "+serveSummary(msg.ports))
+		}
 		return m, nil
 
 	case prefsMsg:

@@ -296,7 +296,10 @@ func (m Model) serveBody(w int) string {
 		foot = append(foot, modalDivider(w),
 			gridLine(w, accountKey("ENTER", "CONFIRM", false), accountKey("ESC", "CANCEL", false)))
 	} else if len(m.serve) == 0 {
-		foot = append(foot, modalLine(w, accountKey("A", "ADD A SERVICE", false)))
+		// Refresh matters most here: "nothing is shared" is also what a stale
+		// view looks like from the outside.
+		foot = append(foot, gridLine(w,
+			accountKey("A", "ADD A SERVICE", false), accountKey("R", "REFRESH", false)))
 	} else {
 		// Green, not red: making something private is the safe direction, and
 		// the label has to name it outright for the exit to be findable.
@@ -309,7 +312,8 @@ func (m Model) serveBody(w int) string {
 		foot = append(foot,
 			gridLine(w, accountKey("J/K", "NAVIGATE", false), accountKey("A", "ADD", false)),
 			gridLine(w, scopeKey, accountKey("D", "REMOVE", false)),
-			gridLine(w, accountKey("C", "COPY URL", false), accountKey("ESC", "CLOSE", false)))
+			gridLine(w, accountKey("C", "COPY URL", false), accountKey("R", "REFRESH", false)),
+			gridLine(w, accountKey("ESC", "CLOSE", false), ""))
 		if m.serveCopied {
 			foot = append(foot, modalLine(w, styles.StatusOK.Render("  ✓ URL copied to clipboard!")))
 		}
@@ -391,6 +395,12 @@ func (m Model) updateServeList(key string) (Model, tea.Cmd, bool) {
 		}
 		return m, copyCmd(clipboardServe, serveURL(port.Host, port.Port, path)), true
 
+	case "r", "R":
+		// Re-read the daemon on demand. Everything here already refetches after
+		// an action, but that is invisible from the outside — and it cannot
+		// catch a change made from another terminal or session at all.
+		return m, refreshServeCmd(), true
+
 	case "a":
 		m.serveInputMode = true
 		m.serveInputErr = false
@@ -444,6 +454,34 @@ func (m Model) updateServeList(key string) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	return m, nil, false
+}
+
+// serveSummary describes the whole config in one line, for the log receipt a
+// manual refresh leaves behind. Public ports are called out separately because
+// that is the number worth re-reading.
+func serveSummary(ports []types.ServePort) string {
+	if len(ports) == 0 {
+		return "nothing is shared"
+	}
+	paths, public := 0, 0
+	for _, p := range ports {
+		paths += len(p.Paths)
+		if p.Funnel {
+			public++
+		}
+	}
+	out := plural(len(ports), "port") + ", " + plural(paths, "path")
+	if public > 0 {
+		return out + fmt.Sprintf(", %d public", public)
+	}
+	return out + ", none public"
+}
+
+func plural(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
 }
 
 // serveTargetArg turns a parsed path back into the argument form the CLI
