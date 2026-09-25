@@ -33,7 +33,23 @@ const (
 	stateRoutingConfirm
 	stateSSH
 	stateServe
+	stateServeConfirm
 )
+
+// servePendingAction is one edit waiting in the Command Room. Target is kept
+// even for a scope change, because returning a port to tailnet-only means
+// RE-ISSUING the serve command with the original target — `funnel ... off`
+// would delete the share outright.
+type servePendingAction struct {
+	action tailscale.ServeAction
+	port   int
+	path   string
+	target string
+	kind   types.ServeKind
+	// paths is every path on the affected port, so a publish confirmation can
+	// name the full blast radius rather than just the highlighted row.
+	paths []types.ServePath
+}
 
 // maxLogEntries caps the in-memory log ring (FIFO) so a long-running session
 // can't leak memory. Oldest entries are dropped once the cap is exceeded.
@@ -134,6 +150,17 @@ type Model struct {
 	// refreshed from the daemon and displayed, never edited here.
 	serve       []types.ServePort
 	serveCursor int
+
+	// Editing state (Phase 41). Unlike the routing modal there is NO staged
+	// working copy: serve has no single command that writes the whole config,
+	// so each action is confirmed and applied on its own. Staging would invent
+	// an atomicity the daemon does not offer, and a half-applied batch would
+	// leave nothing to roll back to.
+	serveInput     textinput.Model
+	serveInputMode bool
+	serveInputErr  bool
+	servePending   servePendingAction // the action awaiting confirmation
+	serveCopied    bool
 
 	// fetchErr holds the last `tailscale status` failure (nil when healthy); it
 	// surfaces as an error line in the logs pane. The last good data stays on

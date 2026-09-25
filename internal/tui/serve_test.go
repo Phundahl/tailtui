@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Phundahl/tailtui/internal/tailscale"
 	"github.com/Phundahl/tailtui/internal/types"
 )
 
@@ -142,17 +143,106 @@ func TestServeCursorClamps(t *testing.T) {
 	}
 }
 
-// Read-only phase: no mutation keys are wired, and none may leak to the list.
-func TestServeIsReadOnly(t *testing.T) {
+// Editing keys stage an action and open the Command Room. Nothing is applied
+// until Enter is pressed there — and no key leaks to the peer list behind.
+func TestServeEditKeysOpenConfirm(t *testing.T) {
+	for _, tc := range []struct {
+		key    string
+		cursor int
+		want   tailscale.ServeAction
+	}{
+		{"d", 0, tailscale.ServeRemovePort},    // cursor on a port row
+		{"d", 1, tailscale.ServeRemovePath},    // cursor on a path row
+		{"space", 0, tailscale.ServeUnpublish}, // :443 is funnelled -> make private
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			m := openServeModal(t, 120, 40, servePorts())
+			m.serveCursor = tc.cursor
+			m2, cmd := m.Update(key(tc.key))
+			got := m2.(Model)
+			if got.state != stateServeConfirm {
+				t.Fatalf("%q did not open the Command Room (state=%v)", tc.key, got.state)
+			}
+			if got.servePending.action != tc.want {
+				t.Fatalf("%q staged action %v, want %v", tc.key, got.servePending.action, tc.want)
+			}
+			if cmd != nil {
+				t.Fatalf("%q applied something before confirmation", tc.key)
+			}
+		})
+	}
+}
+
+// Scope belongs to the port. A path row has no funnel flag of its own, so
+// Space there must do nothing rather than silently act on the parent port.
+func TestServeSpaceOnlyActsOnPortRows(t *testing.T) {
 	m := openServeModal(t, 120, 40, servePorts())
-	for _, k := range []string{"a", "d", "space", "enter"} {
-		m2, cmd := m.Update(key(k))
-		if got := m2.(Model).state; got != stateServe {
-			t.Fatalf("%q changed state to %v; the modal should swallow it", k, got)
-		}
-		if cmd != nil {
-			t.Fatalf("%q dispatched a command in a read-only modal", k)
-		}
+	m.serveCursor = 1 // a path row
+	m2, _ := m.Update(key("space"))
+	if got := m2.(Model).state; got != stateServe {
+		t.Fatalf("Space on a path row opened %v; scope is a port-level property", got)
+	}
+}
+
+// THE regression that matters. `tailscale funnel ... off` deletes the whole
+// share, so unpublishing must re-issue `serve` with the original target.
+func TestServeUnpublishKeepsTheShare(t *testing.T) {
+	m := openServeModal(t, 120, 40, servePorts())
+	m.serveCursor = 0 // :443, funnelled
+	m2, _ := m.Update(key("space"))
+	p := m2.(Model).servePending
+	cmd := tailscale.ServeCommandString(p.action, p.port, p.path, p.target)
+	if strings.Contains(cmd, "funnel") || strings.HasSuffix(cmd, " off") {
+		t.Fatalf("unpublish would delete the share: %s", cmd)
+	}
+	if p.target == "" {
+		t.Fatalf("unpublish needs the original target to re-serve, got empty")
+	}
+}
+
+// Enter applies; Esc goes BACK to the list rather than closing the feature.
+func TestServeConfirmApplyAndBack(t *testing.T) {
+	m := openServeModal(t, 120, 40, servePorts())
+	m2, _ := m.Update(key("d"))
+	m = m2.(Model)
+
+	back, cmd := m.Update(key("esc"))
+	if back.(Model).state != stateServe {
+		t.Fatalf("Esc in the Command Room should return to the list")
+	}
+	if cmd != nil {
+		t.Fatalf("Esc applied something")
+	}
+
+	applied, cmd := m.Update(key("enter"))
+	if applied.(Model).state != stateMain {
+		t.Fatalf("Enter should close to the dashboard before dispatch")
+	}
+	if cmd == nil {
+		t.Fatalf("Enter did not dispatch the edit")
+	}
+}
+
+// The add field owns every key, so a target containing "q" survives.
+func TestServeAddInputOwnsKeys(t *testing.T) {
+	m := openServeModal(t, 120, 40, servePorts())
+	m2, _ := m.Update(key("a"))
+	m = m2.(Model)
+	if !m.serveInputMode {
+		t.Fatalf("[a] did not enter the target editor")
+	}
+	m3, _ := m.Update(key("q"))
+	m = m3.(Model)
+	if m.state != stateServe {
+		t.Fatalf("q while typing closed the modal")
+	}
+	if m.serveInput.Value() != "q" {
+		t.Fatalf("q did not reach the editor: %q", m.serveInput.Value())
+	}
+	m4, _ := m.Update(key("esc"))
+	m = m4.(Model)
+	if m.state != stateServe || m.serveInputMode {
+		t.Fatalf("Esc should cancel the entry, not close the modal")
 	}
 }
 
@@ -236,5 +326,212 @@ func TestHelpListsServeAndDropsStalePaneRow(t *testing.T) {
 	// There is no pane switching: `h` pages the list and `l` opens Accounts.
 	if strings.Contains(view, "Switch Pane") {
 		t.Fatalf("help overlay still advertises pane switching, which does not exist")
+	}
+}
+
+// --- target risk --------------------------------------------------------------
+
+func TestAnalyzeTargetCleanDirectory(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"index.html", "style.css"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := analyzeTarget(dir)
+	if r.Risky() {
+		t.Fatalf("an ordinary web directory must not warn: %+v", r)
+	}
+	if r.Entries != 2 {
+		t.Fatalf("Entries = %d, want 2", r.Entries)
+	}
+}
+
+// The case the whole feature exists for: the danger is in the contents, and a
+// name-based denylist would never catch a project directory holding a .env.
+func TestAnalyzeTargetFindsSensitiveContents(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("SECRET=1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := analyzeTarget(dir)
+	if !r.Risky() {
+		t.Fatalf("directory containing .ssh and .env must warn: %+v", r)
+	}
+	if len(r.Sensitive) != 2 || r.Sensitive[0] != ".env" || r.Sensitive[1] != ".ssh" {
+		t.Fatalf("Sensitive = %v, want [.env .ssh] sorted", r.Sensitive)
+	}
+	if r.SystemDir {
+		t.Fatalf("a temp dir is not a system directory")
+	}
+}
+
+// System directories match EXACTLY. Prefix matching would flag /var/www, which
+// is the normal thing to serve — and a warning that fires on ordinary use is
+// one people learn to ignore.
+func TestAnalyzeTargetSystemDirsAreExactMatches(t *testing.T) {
+	if !analyzeTarget("/etc").SystemDir {
+		t.Fatalf("/etc must be flagged as a system directory")
+	}
+	if !analyzeTarget("/var").SystemDir {
+		t.Fatalf("/var must be flagged")
+	}
+	if analyzeTarget("/var/www").SystemDir {
+		t.Fatalf("/var/www must NOT be flagged — prefix matching regression")
+	}
+	if analyzeTarget("/usr/share/doc").SystemDir {
+		t.Fatalf("/usr/share/doc must NOT be flagged — prefix matching regression")
+	}
+}
+
+func TestAnalyzeTargetTrailingSlashAndMissing(t *testing.T) {
+	if !analyzeTarget("/etc/").SystemDir {
+		t.Fatalf("a trailing slash must not defeat the system-directory check")
+	}
+	r := analyzeTarget(filepath.Join(t.TempDir(), "does-not-exist"))
+	if r.Risky() || r.Entries != 0 {
+		t.Fatalf("a missing path must be inert, got %+v", r)
+	}
+}
+
+// The user's own home directory is the canonical mistake this guards against.
+func TestAnalyzeTargetFlagsHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory available")
+	}
+	if !analyzeTarget(home).SystemDir {
+		t.Fatalf("the user's home directory must be flagged")
+	}
+}
+
+// --- the confirmation's warnings ----------------------------------------------
+
+// confirmFor stages an action and returns the rendered Command Room.
+func confirmFor(t *testing.T, p servePendingAction) string {
+	t.Helper()
+	m := openServeModal(t, 120, 40, servePorts())
+	m.servePending = p
+	m.state = stateServeConfirm
+	return m.View()
+}
+
+// A sensitive directory going public must show BOTH warnings: what is being
+// exposed, and to whom. They are independent risks.
+func TestConfirmShowsBothWarnings(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	view := confirmFor(t, servePendingAction{
+		action: tailscale.ServePublish, port: 443, path: "/files",
+		target: dir, kind: types.ServeFile,
+		paths: []types.ServePath{
+			{Path: "/", Kind: types.ServeProxy, Target: "http://127.0.0.1:3000"},
+			{Path: "/api", Kind: types.ServeProxy, Target: "http://127.0.0.1:8080"},
+		},
+	})
+	assertFlush(t, view, 120, 40)
+	for _, want := range []string{
+		"SENSITIVE FILES", ".ssh",
+		"PUBLIC INTERNET", "all 2 path(s)",
+		"/api", // the blast radius names every path on the port
+		"ABOUT TO EXECUTE", "EXPOSE PUBLICLY",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("confirmation missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// An ordinary proxy going to the tailnet warrants no warning at all. A dialog
+// that shouts every time is one people stop reading.
+func TestConfirmQuietForOrdinaryAdd(t *testing.T) {
+	view := confirmFor(t, servePendingAction{
+		action: tailscale.ServeAdd, port: 443, path: "/app",
+		target: "3000", kind: types.ServeProxy,
+	})
+	for _, unwanted := range []string{"SENSITIVE FILES", "PUBLIC INTERNET"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("ordinary add should not warn about %q:\n%s", unwanted, view)
+		}
+	}
+	if !strings.Contains(view, "ABOUT TO EXECUTE") {
+		t.Fatalf("confirmation must still show the command")
+	}
+}
+
+// Friction is asymmetric: going back to tailnet-only reduces exposure, so it
+// gets a quiet confirmation.
+func TestConfirmQuietForUnpublish(t *testing.T) {
+	view := confirmFor(t, servePendingAction{
+		action: tailscale.ServeUnpublish, port: 443, path: "/",
+		target: "3000", kind: types.ServeProxy,
+		paths: []types.ServePath{{Path: "/", Kind: types.ServeProxy, Target: "3000"}},
+	})
+	if strings.Contains(view, "PUBLIC INTERNET") {
+		t.Fatalf("unpublishing must not warn about public exposure:\n%s", view)
+	}
+	if strings.Contains(view, "EXPOSE PUBLICLY") {
+		t.Fatalf("unpublish should not offer to expose:\n%s", view)
+	}
+}
+
+// A clean directory is not flagged just for being a directory.
+func TestConfirmNoWarningForCleanDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<p>hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view := confirmFor(t, servePendingAction{
+		action: tailscale.ServeAdd, port: 8443, path: "/docs",
+		target: dir, kind: types.ServeFile,
+	})
+	if strings.Contains(view, "SENSITIVE FILES") {
+		t.Fatalf("a clean web directory should not warn:\n%s", view)
+	}
+}
+
+// Replacing an existing mount point is an upsert — say so, rather than letting
+// a share disappear silently.
+func TestConfirmWarnsOnUpsert(t *testing.T) {
+	view := confirmFor(t, servePendingAction{
+		action: tailscale.ServeAdd, port: 443, path: "/api",
+		target: "9000", kind: types.ServeProxy,
+	})
+	if !strings.Contains(view, "REPLACES") {
+		t.Fatalf("adding over an existing path must warn:\n%s", view)
+	}
+}
+
+// A path target needs root; the confirmation should say so before the prompt.
+func TestConfirmMentionsSudoForPathTargets(t *testing.T) {
+	view := confirmFor(t, servePendingAction{
+		action: tailscale.ServeAdd, port: 443, path: "/docs",
+		target: "/srv/docs", kind: types.ServeFile,
+	})
+	if !strings.Contains(view, "requires root") {
+		t.Fatalf("path targets should warn about the sudo prompt:\n%s", view)
+	}
+}
+
+func TestConfirmFitsMinimumTerminal(t *testing.T) {
+	m := openServeModal(t, 72, 24, servePorts())
+	m.servePending = servePendingAction{
+		action: tailscale.ServePublish, port: 443, path: "/",
+		target: "3000", kind: types.ServeProxy,
+		paths: []types.ServePath{{Path: "/", Kind: types.ServeProxy, Target: "3000"}},
+	}
+	m.state = stateServeConfirm
+	view := m.View()
+	assertFlush(t, view, 72, 24)
+	if !strings.Contains(view, "EXPOSE PUBLICLY") {
+		t.Fatalf("keymap dropped at 72x24:\n%s", view)
 	}
 }

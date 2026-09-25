@@ -8,7 +8,9 @@
 package tailscale
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/Phundahl/tailtui/internal/types"
@@ -39,6 +41,7 @@ type mockData struct {
 	peers      []types.Peer
 	accounts   []types.Account
 	prefs      types.Prefs
+	serve      []types.ServePort
 	connected  bool
 	activeExit string // hostname of active exit node, "" when none
 }
@@ -127,6 +130,22 @@ func newMockState() *mockData {
 			AdvertiseRoutes: []string{"192.168.1.0/24", "10.0.0.0/16"},
 			OperatorUser:    mockOperatorUser,
 		},
+		serve: []types.ServePort{
+			{
+				Port: 443, HTTPS: true, Funnel: true,
+				Paths: []types.ServePath{
+					{Path: "/", Kind: types.ServeProxy, Target: "http://127.0.0.1:3000"},
+					{Path: "/api", Kind: types.ServeProxy, Target: "http://127.0.0.1:8080"},
+				},
+			},
+			{
+				Port: 8443, HTTPS: true,
+				Paths: []types.ServePath{
+					{Path: "/docs/", Kind: types.ServeFile, Target: "/srv/tailtui-demo/docs"},
+					{Path: "/motd", Kind: types.ServeText, Target: "back at 14:00"},
+				},
+			},
+		},
 		connected: true,
 	}
 }
@@ -193,23 +212,93 @@ func mockPingValue(ip string) (int, error) {
 // ports covering all three target kinds, with the public one deliberately
 // carrying more than one path so the "funnel exposes every path on this port"
 // warning has something real to warn about.
+// MockApplyServe applies an edit to the in-memory config, so the demo actually
+// responds to add/remove/scope changes instead of silently doing nothing. It
+// parses the argv it is handed, which keeps it honest — it exercises the same
+// command assembly the real path uses.
+func MockApplyServe(args []string) error {
+	mockMu.Lock()
+	defer mockMu.Unlock()
+
+	funnel := len(args) > 0 && args[0] == "funnel"
+	port, path, target, off := 443, "/", "", false
+	for _, a := range args[1:] {
+		switch {
+		case strings.HasPrefix(a, "--https="):
+			fmt.Sscanf(a, "--https=%d", &port)
+		case strings.HasPrefix(a, "--set-path="):
+			path = strings.TrimPrefix(a, "--set-path=")
+		case a == "off":
+			off = true
+		case strings.HasPrefix(a, "--"): // flags with no bearing on mock state
+		default:
+			target = a
+		}
+	}
+
+	idx := -1
+	for i := range mockState.serve {
+		if mockState.serve[i].Port == port {
+			idx = i
+		}
+	}
+
+	if off {
+		if idx < 0 {
+			return nil
+		}
+		if path == "/" {
+			mockState.serve = append(mockState.serve[:idx], mockState.serve[idx+1:]...)
+			return nil
+		}
+		kept := []types.ServePath{}
+		for _, sp := range mockState.serve[idx].Paths {
+			if strings.TrimSuffix(sp.Path, "/") != strings.TrimSuffix(path, "/") {
+				kept = append(kept, sp)
+			}
+		}
+		if len(kept) == 0 {
+			mockState.serve = append(mockState.serve[:idx], mockState.serve[idx+1:]...)
+		} else {
+			mockState.serve[idx].Paths = kept
+		}
+		return nil
+	}
+
+	kind := types.ServeProxy
+	switch {
+	case strings.HasPrefix(target, "text:"):
+		kind, target = types.ServeText, strings.TrimPrefix(target, "text:")
+	case strings.HasPrefix(target, "/"):
+		kind = types.ServeFile
+	}
+
+	if idx < 0 {
+		mockState.serve = append(mockState.serve, types.ServePort{Port: port, HTTPS: true})
+		idx = len(mockState.serve) - 1
+	}
+	mockState.serve[idx].Funnel = funnel
+
+	for i, sp := range mockState.serve[idx].Paths {
+		if strings.TrimSuffix(sp.Path, "/") == strings.TrimSuffix(path, "/") {
+			mockState.serve[idx].Paths[i] = types.ServePath{Path: sp.Path, Kind: kind, Target: target}
+			return nil
+		}
+	}
+	mockState.serve[idx].Paths = append(mockState.serve[idx].Paths,
+		types.ServePath{Path: path, Kind: kind, Target: target})
+	return nil
+}
+
 func mockServeSnapshot() ([]types.ServePort, error) {
-	return []types.ServePort{
-		{
-			Port: 443, HTTPS: true, Funnel: true,
-			Paths: []types.ServePath{
-				{Path: "/", Kind: types.ServeProxy, Target: "http://127.0.0.1:3000"},
-				{Path: "/api", Kind: types.ServeProxy, Target: "http://127.0.0.1:8080"},
-			},
-		},
-		{
-			Port: 8443, HTTPS: true,
-			Paths: []types.ServePath{
-				{Path: "/docs/", Kind: types.ServeFile, Target: "/srv/tailtui-demo/docs"},
-				{Path: "/motd", Kind: types.ServeText, Target: "back at 14:00"},
-			},
-		},
-	}, nil
+	mockMu.Lock()
+	defer mockMu.Unlock()
+	out := make([]types.ServePort, len(mockState.serve))
+	for i, p := range mockState.serve {
+		out[i] = p
+		out[i].Paths = append([]types.ServePath(nil), p.Paths...)
+	}
+	return out, nil
 }
 
 // MockLatencySeed returns a pre-populated per-IP history so the LATENCY

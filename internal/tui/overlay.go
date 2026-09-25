@@ -174,6 +174,13 @@ func restyleModalInput(ti *textinput.Model) {
 // resizeOverlay re-sizes and re-renders the active overlay after a window
 // resize, so the modal tracks the terminal dimensions.
 func (m Model) resizeOverlay() Model {
+	if m.state == stateServeConfirm {
+		return m
+	}
+	if m.state == stateServe && m.serveInputMode {
+		m.serveInput.Width = clampInputWidth(overlayWidth(m.width))
+		restyleModalInput(&m.serveInput)
+	}
 	if m.state == stateSSH {
 		// Rendered from model state each frame, so there is no viewport content
 		// to rebuild — but the editor's visible window is width-dependent and
@@ -241,6 +248,16 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// key does here.
 	if m.state == stateSSH {
 		return m.updateSSH(msg)
+	}
+	// The serve target editor owns ALL keys (incl. esc/q): a path or URL may
+	// legitimately contain a "q", and the global close would truncate it.
+	if m.state == stateServe && m.serveInputMode {
+		return m.updateServeInput(msg)
+	}
+	// The serve Command Room owns its keys too, so Esc means BACK to the list
+	// rather than closing the whole feature.
+	if m.state == stateServeConfirm {
+		return m.updateServeConfirm(msg)
 	}
 	if key == "esc" || key == "q" {
 		m.state = stateMain
@@ -376,6 +393,10 @@ func (m Model) renderOverlay(base string) string {
 	if m.state == stateSSH {
 		return m.renderSSHOverlay(base)
 	}
+	// The serve Command Room renders from model state each frame.
+	if m.state == stateServeConfirm {
+		return m.renderServeConfirmOverlay(base)
+	}
 	// The routing confirmation ("Command Room") is also rendered directly.
 	if m.state == stateRoutingConfirm {
 		return m.renderRoutingConfirmOverlay(base)
@@ -404,7 +425,11 @@ func (m Model) renderOverlay(base string) string {
 		hint = "[Esc] Close"
 	case stateServe:
 		title = "SERVE_AND_FUNNEL"
-		hint = "[Esc] Close"
+		if m.serveInputMode {
+			hint = "-- KEYBOARD INPUT MODE ACTIVE --"
+		} else {
+			hint = "[Esc] Close"
+		}
 	case stateRouting:
 		title = "ROUTING_MANAGEMENT"
 		if m.routingInputMode {

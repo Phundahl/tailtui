@@ -201,6 +201,7 @@ type clipboardKind int
 const (
 	clipboardRouting clipboardKind = iota
 	clipboardSSH
+	clipboardServe
 )
 
 // clipboardMsg carries the result of a copy-to-clipboard action.
@@ -232,6 +233,40 @@ func fetchServeCmd() tea.Cmd {
 		defer cancel()
 		ports, err := tailscale.ServeStatus(ctx)
 		return serveMsg{ports: ports, err: err}
+	}
+}
+
+// serveActionMsg is delivered after a Serve/Funnel edit finishes.
+type serveActionMsg struct {
+	desc string
+	err  error
+}
+
+// serveApplyCmd runs one Serve/Funnel edit.
+//
+// Filesystem targets are PRIVILEGED — the daemon refuses them unless the
+// caller is root — so those go through tea.ExecProcess with sudo, giving the
+// password prompt a real terminal. Ports and text need no elevation and stay
+// background commands, so the common case never flashes a sudo prompt.
+func serveApplyCmd(p servePendingAction) tea.Cmd {
+	args := tailscale.ServeArgs(p.action, p.port, p.path, p.target)
+	desc := tailscale.ServeCommandString(p.action, p.port, p.path, p.target)
+
+	if tailscale.MockEnabled() {
+		return func() tea.Msg { return serveActionMsg{desc: desc + " (mock)"} }
+	}
+
+	if tailscale.ServeNeedsRoot(p.action, p.target) {
+		c := exec.Command("sudo", append([]string{"tailscale"}, args...)...)
+		return tea.ExecProcess(c, func(err error) tea.Msg {
+			return serveActionMsg{desc: desc, err: err}
+		})
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return serveActionMsg{desc: desc, err: tailscale.ApplyServe(ctx, args)}
 	}
 }
 
