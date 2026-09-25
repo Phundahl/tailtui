@@ -788,6 +788,9 @@ func helpBody(w int) string {
 		{"Navigate While Typing", "↑↓  Ctrl+j/k"},
 		{"Apply Filter (blur box)", "Enter / Esc"},
 		{"Clear Filter", "Esc (in list)"},
+		// The NODES title says N are hidden; this is where it says how to
+		// reach them. Without it the count is a dead end.
+		{"Show Funnel Ingress Nodes", "/ ingress"},
 	})...)
 	lines = append(lines, group("NODE ACTIONS", [][2]string{
 		{"Connect / Disconnect", "c"},

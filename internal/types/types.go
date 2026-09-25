@@ -107,6 +107,13 @@ type Peer struct {
 	// use it, because per-peer capabilities are not exposed by the CLI.
 	OffersSSH bool
 
+	// IsIngress marks one of Tailscale's own funnel ingress nodes, which join
+	// the tailnet only while a funnel is live and leave when it stops. They
+	// are infrastructure, not tailnet members: they answer no ping, offer no
+	// exit node, routes or SSH, and there are ~23 of them, so a peer list that
+	// showed them would be almost entirely noise whenever funnel is on.
+	IsIngress bool
+
 	// IsActiveExitNode is true when the local node is currently routing all
 	// traffic through this peer. At most one peer should have this set, and
 	// only nodes with OffersExitNode == true may have it.

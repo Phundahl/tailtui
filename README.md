@@ -64,7 +64,9 @@ Every release is in **[CHANGELOG.md](CHANGELOG.md)**.
   so outright, with `[SPACE] MAKE PRIVATE` naming the way back instead of
   leaving you to infer it from a generic toggle label. `r` re-reads the daemon
   and logs what it found, so you can confirm a change actually landed rather
-  than taking the screen's word for it.
+  than taking the screen's word for it. A live funnel also adds roughly two
+  dozen of Tailscale's own ingress nodes to your tailnet; those are kept out of
+  the node list, which says how many it is hiding, and `/` still finds them.
 - **Live, multi-row latency graphing.** Select any peer and watch a real-time
   vertical bar chart of round-trip latency (`tailscale ping`), color-graded by
   severity, with live MIN / AVG / MAX. The chart grows to fill the pane.

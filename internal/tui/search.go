@@ -27,7 +27,17 @@ func (m Model) searchActive() bool { return m.searchFocused || m.searchQuery != 
 func (m Model) filterPeers() []types.Peer {
 	q := strings.TrimSpace(m.searchQuery)
 	if q == "" {
-		return append([]types.Peer(nil), m.allPeers...)
+		// Funnel ingress nodes are hidden from the resting list: there are ~23
+		// of them whenever a funnel is live, and they would crowd out the real
+		// tailnet. They are hidden, not dropped — a query still reaches them,
+		// so the tool declutters rather than deciding what you may see.
+		out := make([]types.Peer, 0, len(m.allPeers))
+		for _, p := range m.allPeers {
+			if !p.IsIngress {
+				out = append(out, p)
+			}
+		}
+		return out
 	}
 	out := make([]types.Peer, 0, len(m.allPeers))
 	for _, p := range m.allPeers {
@@ -36,6 +46,21 @@ func (m Model) filterPeers() []types.Peer {
 		}
 	}
 	return out
+}
+
+// hiddenIngress counts what the resting list is leaving out, for the NODES
+// title. Hiding something silently and hiding it visibly are different claims.
+func (m Model) hiddenIngress() int {
+	if strings.TrimSpace(m.searchQuery) != "" {
+		return 0 // a query shows them, so nothing is being withheld
+	}
+	n := 0
+	for _, p := range m.allPeers {
+		if p.IsIngress {
+			n++
+		}
+	}
+	return n
 }
 
 // filteredItems builds the list items for the current filter, with live latency
