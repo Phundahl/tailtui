@@ -353,17 +353,14 @@ copy). See the Roadmap for what's next.
 
 ## Roadmap
 
-Parked, upcoming features for future development cycles:
+Parked for a future development cycle:
 
 - **Connection diagnostics.** A deep dive into peer connection health —
   surfacing whether traffic is taking a DERP relay or a direct path, with the
   signals needed to debug a flaky link.
-- **ACL tag management.** Handling machine identities and `--advertise-tags` for
-  production server environments, so tagged nodes can be provisioned and audited
-  without leaving the TUI.
 
-Smaller parked items: ping-as-action, and surfacing the tailnet's SSH
-capability grant as an up-front warning in the launcher.
+Smaller parked item: surfacing the tailnet's SSH capability grant as an up-front
+warning in the launcher.
 
 ## Acknowledgments
 

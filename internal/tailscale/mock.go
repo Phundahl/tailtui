@@ -22,6 +22,10 @@ var mockEnabled = os.Getenv("TAILTUI_MOCK") == "1"
 // mockOperatorUser makes the demo tailnet look like operator setup has already
 // been done, so the mock dashboard shows the steady-state footer (no `[O]`
 // hint) rather than nagging about a one-time step that cannot be run in mock.
+// mockUser is the fictional operator identity. It matches the mock accounts'
+// local part (demo@tailtui.dev) so the demo reads as one coherent persona.
+const mockUser = "demo"
+
 var mockOperatorUser = CurrentUser()
 
 // MockEnabled reports whether the in-memory mock state is active.
@@ -111,8 +115,12 @@ func newMockState() *mockData {
 	}
 	return &mockData{
 		local: types.LocalStatus{
-			User:        "demo@tailtui.dev",
-			Hostname:    "tailtui-demo",
+			User:     "demo@tailtui.dev",
+			Hostname: "tailtui-demo",
+			// The full MagicDNS name, as the real daemon reports it. Without
+			// it the Serve view falls back to a "this-node" placeholder, and
+			// the browsable URL is one of that feature's selling points.
+			DNSName:     "tailtui-demo.tailtui.dev",
 			LocalIP:     "192.168.1.42",
 			TailscaleIP: "100.64.0.1",
 			Conn:        types.ConnDirect,
@@ -132,14 +140,14 @@ func newMockState() *mockData {
 		},
 		serve: []types.ServePort{
 			{
-				Port: 443, HTTPS: true, Funnel: true,
+				Host: "tailtui-demo.tailtui.dev", Port: 443, HTTPS: true, Funnel: true,
 				Paths: []types.ServePath{
 					{Path: "/", Kind: types.ServeProxy, Target: "http://127.0.0.1:3000"},
 					{Path: "/api", Kind: types.ServeProxy, Target: "http://127.0.0.1:8080"},
 				},
 			},
 			{
-				Port: 8443, HTTPS: true,
+				Host: "tailtui-demo.tailtui.dev", Port: 8443, HTTPS: true,
 				Paths: []types.ServePath{
 					{Path: "/docs/", Kind: types.ServeFile, Target: "/srv/tailtui-demo/docs"},
 					{Path: "/motd", Kind: types.ServeText, Target: "back at 14:00"},

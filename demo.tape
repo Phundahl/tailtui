@@ -2,6 +2,7 @@
 #
 # Requires:
 #   - charmbracelet/vhs on PATH:  go install github.com/charmbracelet/vhs@latest
+#   - ttyd, which vhs shells out to (Arch: pacman -S ttyd). ffmpeg too.
 #   - the binary built in this directory:  go build -o tailtui .
 #
 # Render with:
@@ -63,6 +64,28 @@ Down 1
 Sleep 800ms
 Down 1
 Sleep 800ms
+Escape
+Sleep 600ms
+
+# Serve & Funnel (Shift+F) — what this node shares, and with whom.
+# The fixture has a PUBLIC :443 proxying two paths, and a tailnet-only :8443
+# serving a directory and a literal string, so the tree shows both scopes and
+# all three target kinds. The cursor opens on the public port, so the red
+# PUBLIC banner and the green [SPACE] MAKE PRIVATE label are on screen at once.
+Type "F"
+Sleep 3s
+
+# Move to the tailnet-only :8443 — the keymap flips to MAKE PUBLIC.
+Down 3
+Sleep 2s
+
+# Space opens the Command Room. Nothing is applied: the confirmation names the
+# port, lists every path that would become reachable from the internet, and
+# Escape backs out of it. This is the whole safety story in one beat.
+Space
+Sleep 3500ms
+Escape
+Sleep 1s
 Escape
 Sleep 600ms
 
