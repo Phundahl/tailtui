@@ -53,6 +53,12 @@ Every release is in **[CHANGELOG.md](CHANGELOG.md)**.
   resolution, and host-key verification all handled — and the TUI restores
   itself when the session ends. `c` copies the command instead. Nodes running
   the Tailscale SSH server are marked in the list.
+- **See what you are sharing.** Press `F` for a live view of Tailscale Serve and
+  Funnel — every listening port, the paths mounted on it, and whether it is
+  reachable by your tailnet or by the whole internet. Directory shares are
+  resolved on the spot (*directory, 12 entries*), and anything public is called
+  out in red on the dashboard, because the real hazard is forgetting a Funnel is
+  still running.
 - **Live, multi-row latency graphing.** Select any peer and watch a real-time
   vertical bar chart of round-trip latency (`tailscale ping`), color-graded by
   severity, with live MIN / AVG / MAX. The chart grows to fill the pane.
@@ -198,6 +204,7 @@ ANSI on 256-color terminals.
 | `x` | Toggle the highlighted peer as the active exit node (exit-capable peers only) |
 | `s` | **SSH launcher** — preview and run `tailscale ssh` against the highlighted peer (any online peer) |
 | `e` | Expand a subnet router's advertised routes |
+| `F` | **Serve & Funnel** — view what this node shares, and with whom |
 | `v` | Open / close the full event-log overlay |
 | `l` | Account management — switch · add · remove · logout |
 | `S` | Advanced settings — toggle local prefs (`Space`) via `tailscale set` |
@@ -328,8 +335,8 @@ without 24-bit support.
 
 `tailTUI` is in active development. The node list, details, latency graphs,
 routes, logs, exit-node control, connection toggle, account management,
-advanced preference toggles, and the SSH launcher are all wired to live
-Tailscale data. The routing management overlay reads live advertised-route
+advanced preference toggles, the SSH launcher and the Serve/Funnel view are
+all wired to live Tailscale data. The routing management overlay reads live advertised-route
 state, stages exit-node / subnet-route edits, and applies them through a
 transparent "Command Room" confirmation (`tailscale set`, with clipboard
 copy). See the Roadmap for what's next.
@@ -338,9 +345,10 @@ copy). See the Roadmap for what's next.
 
 Parked, upcoming features for future development cycles:
 
-- **Tailscale Serve & Funnel management.** Visual port forwarding to securely
-  expose local services to the tailnet (Serve) or the public internet (Funnel),
-  managed from the same keyboard-driven overlays.
+- **Editing Serve & Funnel.** The read-only view landed in v1.5.0; adding,
+  removing and switching a port between tailnet-only and public will follow,
+  applied through the same "Command Room" confirmation used for routing —
+  naming every path a port exposes before anything goes public.
 - **Connection diagnostics.** A deep dive into peer connection health —
   surfacing whether traffic is taking a DERP relay or a direct path, with the
   signals needed to debug a flaky link.

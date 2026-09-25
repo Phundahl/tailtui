@@ -32,6 +32,7 @@ const (
 	stateRouting
 	stateRoutingConfirm
 	stateSSH
+	stateServe
 )
 
 // maxLogEntries caps the in-memory log ring (FIFO) so a long-running session
@@ -129,6 +130,11 @@ type Model struct {
 	sshLastUser  string
 	sshCopied    bool
 
+	// Serve & Funnel modal state (Phase 40). Read-only this phase: the list is
+	// refreshed from the daemon and displayed, never edited here.
+	serve       []types.ServePort
+	serveCursor int
+
 	// fetchErr holds the last `tailscale status` failure (nil when healthy); it
 	// surfaces as an error line in the logs pane. The last good data stays on
 	// screen across a transient failure.
@@ -168,7 +174,7 @@ func New() Model {
 // Init implements tea.Model: fetch live status + account profiles + local prefs
 // immediately, and start the status-refresh and ping tickers.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(fetchStatusCmd(), fetchAccountsCmd(), fetchPrefsCmd(), tickCmd(), pingTickCmd())
+	return tea.Batch(fetchStatusCmd(), fetchAccountsCmd(), fetchPrefsCmd(), fetchServeCmd(), tickCmd(), pingTickCmd())
 }
 
 // selectedPeer returns the peer currently highlighted in the list, and false

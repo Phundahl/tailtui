@@ -39,6 +39,11 @@ var (
 	// instead of inheriting the terminal's default foreground.
 	IconOnline, IconOffline lipgloss.Style
 
+	// Alert is the dashboard-level danger style (red on the base Background),
+	// distinct from StatusErr which carries the modal Surface. Reserved for
+	// state the user must not miss — currently only a live public Funnel.
+	Alert lipgloss.Style
+
 	Caution lipgloss.Style // relayed/degraded (yellow)
 	Button  lipgloss.Style // [ Connect ]-style bracketed buttons
 
@@ -87,6 +92,7 @@ func Apply(t Theme) {
 	IconOnline = lipgloss.NewStyle().Foreground(Secondary)
 	IconOffline = lipgloss.NewStyle().Foreground(Subtle)
 	Caution = lipgloss.NewStyle().Foreground(Warn) // relayed / degraded (yellow)
+	Alert = lipgloss.NewStyle().Foreground(Danger).Bold(true)
 	Button = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 
 	// Opaque modal surface: foreground colors over the elevated Surface color.

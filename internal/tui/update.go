@@ -134,6 +134,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.appendLog("ERROR", "ssh "+msg.target+": "+msg.err.Error()), fetchStatusCmd()
 		}
 
+	case serveMsg:
+		// Live Serve/Funnel config arrived. Keep the last good list on error so
+		// a transient CLI failure cannot make an active share appear to vanish.
+		if msg.err != nil {
+			return m.appendLog("ERROR", "read serve config: "+msg.err.Error()), nil
+		}
+		m.serve = msg.ports
+		if m.serveCursor >= m.serveItemCount() {
+			m.serveCursor = 0
+		}
+		if m.state == stateServe {
+			m = m.resizeOverlay()
+		}
+		return m, nil
+
 	case prefsMsg:
 		// Live local-node preferences arrived; store them so the Advanced Settings
 		// checkboxes (rendered from m.prefs each frame) reflect reality. Keep the
@@ -283,6 +298,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if p, ok := m.selectedPeer(); ok && p.Online {
 				return m.openSSH(p), nil
 			}
+			return m, nil
+		case "F":
+			// Serve & Funnel modal (uppercase F / shift+f) plus a refresh of
+			// the live config.
+			return m.openServe(), fetchServeCmd()
+		case "f":
+			// Lowercase `f` is reserved for a future serve-related action;
+			// ignore it so it never reaches the list keymap.
 			return m, nil
 		case "R":
 			// Open the Routing Management modal (uppercase R / shift+r) and refresh

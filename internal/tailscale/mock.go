@@ -189,6 +189,29 @@ func mockPingValue(ip string) (int, error) {
 	return mockBaseline(ip) + mockWaveOffset[tick%len(mockWaveOffset)], nil
 }
 
+// mockServeSnapshot returns the demo Serve/Funnel configuration: two listening
+// ports covering all three target kinds, with the public one deliberately
+// carrying more than one path so the "funnel exposes every path on this port"
+// warning has something real to warn about.
+func mockServeSnapshot() ([]types.ServePort, error) {
+	return []types.ServePort{
+		{
+			Port: 443, HTTPS: true, Funnel: true,
+			Paths: []types.ServePath{
+				{Path: "/", Kind: types.ServeProxy, Target: "http://127.0.0.1:3000"},
+				{Path: "/api", Kind: types.ServeProxy, Target: "http://127.0.0.1:8080"},
+			},
+		},
+		{
+			Port: 8443, HTTPS: true,
+			Paths: []types.ServePath{
+				{Path: "/docs/", Kind: types.ServeFile, Target: "/srv/tailtui-demo/docs"},
+				{Path: "/motd", Kind: types.ServeText, Target: "back at 14:00"},
+			},
+		},
+	}, nil
+}
+
 // MockLatencySeed returns a pre-populated per-IP history so the LATENCY
 // HISTORY pane isn't empty during the first few seconds of a recording. The
 // TUI installs this into Model.latency at startup; live ping ticks append on
