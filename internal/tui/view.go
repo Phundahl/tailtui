@@ -311,6 +311,28 @@ func (m Model) renderActionButtons(cw int) string {
 	return lipgloss.PlaceHorizontal(cw, lipgloss.Center, row)
 }
 
+// ingressTitle appends the hidden-ingress count, but only in a form that fits.
+// styles.titledTop drops an over-long title ENTIRELY rather than truncating it,
+// so an unconditional suffix costs the whole search indicator on a narrow
+// terminal — a worse trade than not spelling out the count. Degrades through
+// shorter forms before giving up.
+func ingressTitle(base string, n, paneW int) string {
+	if n <= 0 {
+		return base
+	}
+	budget := paneW - 7 // titledTop: "┌" + "─┤ " + title + " ├" + "┐"
+	for _, suffix := range []string{
+		fmt.Sprintf("  %d ingress hidden", n),
+		fmt.Sprintf("  +%d ingress", n),
+		fmt.Sprintf("  +%d", n),
+	} {
+		if lipgloss.Width(base+suffix) <= budget {
+			return base + suffix
+		}
+	}
+	return base
+}
+
 func (m Model) renderNodes(lay layout) string {
 	// The bubbles list is the focused element, so the NODES pane gets the bright
 	// border. It flexes to fill the left column below LOCAL_NODE. The pane title
@@ -321,6 +343,8 @@ func (m Model) renderNodes(lay layout) string {
 		title = "SEARCH: " + searchDisplay(m.searchQuery, lay.leftW) + "▌"
 	} else if m.searchQuery != "" {
 		title = "FILTER: " + searchDisplay(m.searchQuery, lay.leftW)
+	} else {
+		title = ingressTitle(title, m.hiddenIngress(), lay.leftW)
 	}
 	return styles.Pane(title, m.peers.View(), lay.leftW, lay.nodesH, true)
 }

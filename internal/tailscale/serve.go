@@ -103,7 +103,7 @@ func mapServe(w serveWire) []types.ServePort {
 			}
 			p := byPort[port]
 			if p == nil {
-				p = &types.ServePort{Port: port}
+				p = &types.ServePort{Port: port, Host: hostOf(hostPort)}
 				byPort[port] = p
 			}
 			if funnel[hostPort] {
@@ -135,6 +135,16 @@ func mapServe(w serveWire) []types.ServePort {
 	return ports
 }
 
+// hostOf extracts the full MagicDNS host from a "host:port" config key. This
+// is the only reliable source for a browsable URL — the local node's Hostname
+// is the short name, without the tailnet suffix.
+func hostOf(hostPort string) string {
+	if i := strings.LastIndex(hostPort, ":"); i >= 0 {
+		return hostPort[:i]
+	}
+	return hostPort
+}
+
 // portOf extracts the listening port from a "host:port" config key.
 func portOf(hostPort string) int {
 	i := strings.LastIndex(hostPort, ":")
@@ -158,4 +168,103 @@ func NormalizeServePath(p string) string {
 		return strings.TrimSuffix(p, "/")
 	}
 	return p
+}
+
+// ApplyServe runs one serve/funnel command. The adapter owns this because it
+// is the only package that knows the CLI's shape and error format.
+func ApplyServe(ctx context.Context, args []string) error {
+	if mockEnabled {
+		return MockApplyServe(args)
+	}
+	out, err := exec.CommandContext(ctx, "tailscale", args...).CombinedOutput()
+	return cliError("tailscale "+strings.Join(args, " "), out, err)
+}
+
+// --- command assembly --------------------------------------------------------
+//
+// Every operation below was verified against a live daemon. Two of them are
+// counter-intuitive enough to be worth stating plainly:
+//
+//   - Turning funnel OFF is NOT `tailscale funnel … off`. That command removes
+//     the entire serve config, so a user switching a port back to tailnet-only
+//     would silently lose the share. The correct move is to RE-ISSUE the serve
+//     command with the original target, which the daemon answers with
+//     "Removing Funnel …" while leaving the share intact.
+//   - Funnel needs --yes because the CLI has its own interactive prompt, and
+//     tailtui has already asked via the Command Room.
+
+// ServeAction is one pending edit, awaiting confirmation.
+type ServeAction int
+
+const (
+	// ServeAdd mounts a target at a path (an upsert — an existing path is
+	// replaced, not duplicated).
+	ServeAdd ServeAction = iota
+	// ServeRemovePath unmounts a single path.
+	ServeRemovePath
+	// ServeRemovePort unmounts every path on a listening port.
+	ServeRemovePort
+	// ServePublish makes a port reachable from the public internet.
+	ServePublish
+	// ServeUnpublish returns a port to tailnet-only WITHOUT dropping the share.
+	ServeUnpublish
+)
+
+// ServeArgs builds the argv for an action. port is the LISTENING port, path the
+// mount point, target the proxy URL / filesystem path / "text:…" literal.
+func ServeArgs(action ServeAction, port int, path, target string) []string {
+	var args []string
+	switch action {
+	case ServePublish:
+		args = []string{"funnel", "--bg", "--yes"}
+	case ServeAdd, ServeUnpublish:
+		args = []string{"serve", "--bg"}
+	default:
+		args = []string{"serve"}
+	}
+	if port != 0 {
+		args = append(args, fmt.Sprintf("--https=%d", port))
+	}
+	if path != "" && path != "/" {
+		args = append(args, "--set-path="+strings.TrimSuffix(path, "/"))
+	}
+	switch action {
+	case ServeRemovePath, ServeRemovePort:
+		return append(args, "off")
+	default:
+		return append(args, target)
+	}
+}
+
+// ServeCommandString renders the copy-pasteable command shown in the Command
+// Room. Built FROM ServeArgs so the preview cannot drift from what executes.
+func ServeCommandString(action ServeAction, port int, path, target string) string {
+	return "tailscale " + strings.Join(ServeArgs(action, port, path, target), " ")
+}
+
+// ServeNeedsRoot reports whether an action requires elevation. The daemon
+// refuses to serve a filesystem path or Unix socket unless the caller is root:
+// "401 Unauthorized: must be root, or be an operator and able to run
+// 'sudo tailscale' to serve a path or Unix socket". Ports and text do not.
+func ServeNeedsRoot(action ServeAction, target string) bool {
+	switch action {
+	case ServeAdd, ServePublish, ServeUnpublish:
+		return isPathTarget(target)
+	default:
+		return false
+	}
+}
+
+// isPathTarget reports whether a target string names a filesystem path rather
+// than a port, URL or text literal.
+func isPathTarget(t string) bool {
+	if t == "" || strings.HasPrefix(t, "text:") {
+		return false
+	}
+	for _, scheme := range []string{"http://", "https://", "https+insecure://", "unix:"} {
+		if strings.HasPrefix(t, scheme) {
+			return strings.HasPrefix(t, "unix:")
+		}
+	}
+	return strings.HasPrefix(t, "/") || strings.HasPrefix(t, "./") || strings.HasPrefix(t, "~")
 }

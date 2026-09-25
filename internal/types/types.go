@@ -107,6 +107,13 @@ type Peer struct {
 	// use it, because per-peer capabilities are not exposed by the CLI.
 	OffersSSH bool
 
+	// IsIngress marks one of Tailscale's own funnel ingress nodes, which join
+	// the tailnet only while a funnel is live and leave when it stops. They
+	// are infrastructure, not tailnet members: they answer no ping, offer no
+	// exit node, routes or SSH, and there are ~23 of them, so a peer list that
+	// showed them would be almost entirely noise whenever funnel is on.
+	IsIngress bool
+
 	// IsActiveExitNode is true when the local node is currently routing all
 	// traffic through this peer. At most one peer should have this set, and
 	// only nodes with OffersExitNode == true may have it.
@@ -149,8 +156,12 @@ func (p Peer) Badge() string {
 
 // LocalStatus represents the local machine's Tailscale state.
 type LocalStatus struct {
-	User           string
-	Hostname       string
+	User     string
+	Hostname string
+	// DNSName is the node's FULL MagicDNS name ("node.tailnet.ts.net").
+	// Hostname is the short form and does not resolve on its own, so anything
+	// building a browsable URL must use this.
+	DNSName        string
 	LocalIP        string
 	TailscaleIP    string
 	Conn           ConnType
@@ -248,6 +259,11 @@ type ServePath struct {
 // Funnel is per-port, not per-path: it is keyed by host:port in the daemon's
 // config, so enabling it exposes EVERY path in Paths to the public internet.
 type ServePort struct {
+	// Host is the full MagicDNS name the daemon serves on, taken verbatim from
+	// its config key (e.g. "node.tailnet.ts.net"). Kept rather than rebuilt
+	// from the local hostname, which is the SHORT name and yields a URL that
+	// does not resolve.
+	Host   string
 	Port   int
 	HTTPS  bool
 	Funnel bool

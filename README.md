@@ -53,12 +53,20 @@ Every release is in **[CHANGELOG.md](CHANGELOG.md)**.
   resolution, and host-key verification all handled — and the TUI restores
   itself when the session ends. `c` copies the command instead. Nodes running
   the Tailscale SSH server are marked in the list.
-- **See what you are sharing.** Press `F` for a live view of Tailscale Serve and
-  Funnel — every listening port, the paths mounted on it, and whether it is
-  reachable by your tailnet or by the whole internet. Directory shares are
-  resolved on the spot (*directory, 12 entries*), and anything public is called
-  out in red on the dashboard, because the real hazard is forgetting a Funnel is
-  still running.
+- **Share a service, and know exactly what you shared.** Press `F` to view and
+  control Tailscale Serve and Funnel — add a port, directory or text, remove it,
+  or switch a port between tailnet-only and public. Before anything is applied,
+  the confirmation names *what* you are exposing and *to whom*: a directory is
+  inspected first, so sharing one that contains `.ssh` or `.env` says so in as
+  many words, and going public lists every path on that port. Anything live and
+  public is flagged in red on the dashboard, because the real hazard is
+  forgetting a Funnel is still running — and on a public entry the modal says
+  so outright, with `[SPACE] MAKE PRIVATE` naming the way back instead of
+  leaving you to infer it from a generic toggle label. `r` re-reads the daemon
+  and logs what it found, so you can confirm a change actually landed rather
+  than taking the screen's word for it. A live funnel also adds roughly two
+  dozen of Tailscale's own ingress nodes to your tailnet; those are kept out of
+  the node list, which says how many it is hiding, and `/` still finds them.
 - **Live, multi-row latency graphing.** Select any peer and watch a real-time
   vertical bar chart of round-trip latency (`tailscale ping`), color-graded by
   severity, with live MIN / AVG / MAX. The chart grows to fill the pane.
@@ -204,7 +212,7 @@ ANSI on 256-color terminals.
 | `x` | Toggle the highlighted peer as the active exit node (exit-capable peers only) |
 | `s` | **SSH launcher** — preview and run `tailscale ssh` against the highlighted peer (any online peer) |
 | `e` | Expand a subnet router's advertised routes |
-| `F` | **Serve & Funnel** — view what this node shares, and with whom |
+| `F` | **Serve & Funnel** — view and control what this node shares, and with whom |
 | `v` | Open / close the full event-log overlay |
 | `l` | Account management — switch · add · remove · logout |
 | `S` | Advanced settings — toggle local prefs (`Space`) via `tailscale set` |
@@ -345,10 +353,6 @@ copy). See the Roadmap for what's next.
 
 Parked, upcoming features for future development cycles:
 
-- **Editing Serve & Funnel.** The read-only view landed in v1.5.0; adding,
-  removing and switching a port between tailnet-only and public will follow,
-  applied through the same "Command Room" confirmation used for routing —
-  naming every path a port exposes before anything goes public.
 - **Connection diagnostics.** A deep dive into peer connection health —
   surfacing whether traffic is taking a DERP relay or a direct path, with the
   signals needed to debug a flaky link.

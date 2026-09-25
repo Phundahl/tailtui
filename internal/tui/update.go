@@ -134,6 +134,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.appendLog("ERROR", "ssh "+msg.target+": "+msg.err.Error()), fetchStatusCmd()
 		}
 
+	case serveActionMsg:
+		// A Serve/Funnel edit finished. Refresh so the tree reflects the
+		// daemon's truth rather than an assumption about what the edit did.
+		m.state = stateMain
+		if msg.err != nil {
+			return m.appendLog("ERROR", "serve: "+msg.err.Error()), fetchServeCmd()
+		}
+		return m.appendLog("INFO", "applied: "+msg.desc), fetchServeCmd()
+
 	case serveMsg:
 		// Live Serve/Funnel config arrived. Keep the last good list on error so
 		// a transient CLI failure cannot make an active share appear to vanish.
@@ -146,6 +155,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.state == stateServe {
 			m = m.resizeOverlay()
+		}
+		if msg.manual {
+			// State the counts, not "refreshed": a receipt is only worth
+			// anything if it says what was found.
+			m = m.appendLog("INFO", "serve config: "+serveSummary(msg.ports))
 		}
 		return m, nil
 
@@ -192,6 +206,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// log the failure when no clipboard tool is available).
 		if msg.err != nil {
 			return m.appendLog("ERROR", "clipboard: "+msg.err.Error()), nil
+		}
+		if msg.kind == clipboardServe {
+			m.serveCopied = true
+			return m.appendLog("INFO", "serve command copied to clipboard"), nil
 		}
 		if msg.kind == clipboardSSH {
 			m.sshCopied = true

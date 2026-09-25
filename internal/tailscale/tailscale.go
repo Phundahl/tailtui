@@ -348,6 +348,7 @@ func mapLocal(s *status) types.LocalStatus {
 	return types.LocalStatus{
 		User:        s.login(self.UserID),
 		Hostname:    self.HostName,
+		DNSName:     strings.TrimSuffix(self.DNSName, "."),
 		LocalIP:     firstPrivateAddr(self.Addrs),
 		TailscaleIP: first(self.TailscaleIPs),
 		Conn:        localConn(s.BackendState, self),
@@ -375,6 +376,7 @@ func mapPeers(s *status) []types.Peer {
 			Conn:             peerConn(n),
 			Relay:            n.Relay,
 			Tags:             n.Tags,
+			IsIngress:        isIngressNode(n.Tags, n.DNSName),
 			LastSeen:         humanizeLastSeen(n.Online, n.LastSeen),
 			Online:           n.Online,
 			NodeType:         nodeType(n.ExitNodeOption, routes),
@@ -434,6 +436,26 @@ func peerConn(n *node) types.ConnType {
 	default:
 		return types.ConnRelay
 	}
+}
+
+// isIngressNode identifies one of Tailscale's funnel ingress nodes.
+//
+// It requires BOTH the tag and an empty DNSName, and deliberately does not
+// match on the hostname. Verified against a live daemon: the whole fleet is
+// tagged `tag:ingress` with no DNSName and no OS, while any real node — an
+// ingress controller a user tagged themselves, say — has a DNSName. Matching
+// the hostname string would break silently the day the fleet is renamed, and
+// would be a string test where a structural one exists.
+func isIngressNode(tags []string, dnsName string) bool {
+	if strings.TrimSuffix(dnsName, ".") != "" {
+		return false
+	}
+	for _, t := range tags {
+		if t == "tag:ingress" {
+			return true
+		}
+	}
+	return false
 }
 
 func nodeType(offersExit bool, routes []string) types.NodeType {

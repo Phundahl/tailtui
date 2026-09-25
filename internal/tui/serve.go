@@ -3,7 +3,13 @@ package tui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Phundahl/tailtui/internal/styles"
 	"github.com/Phundahl/tailtui/internal/tailscale"
@@ -34,6 +40,7 @@ func (m Model) serveItemCount() int {
 func (m Model) openServe() Model {
 	m.state = stateServe
 	m.serveCursor = 0
+	m.serveCopied = false
 	w := overlayWidth(m.width)
 	content := m.serveBody(w)
 	m.overlay = newOverlayVP(w, overlayHeight(m.height, countLines(content)), content)
@@ -79,11 +86,88 @@ func humanBytes(n int64) string {
 	}
 }
 
+// --- target risk -------------------------------------------------------------
+
+// sensitiveNames are entries whose presence in a directory means serving it
+// would expose credentials. Matched on IMMEDIATE children only: a recursive
+// walk would be slow on a large tree and would flag far too much.
+var sensitiveNames = map[string]bool{
+	".ssh": true, ".aws": true, ".kube": true, ".gnupg": true,
+	".env": true, ".git-credentials": true, ".netrc": true, ".npmrc": true,
+	".docker": true, "id_rsa": true, "id_ed25519": true, "credentials.json": true,
+}
+
+// systemDirs are directories that should never be served wholesale.
+//
+// Matched EXACTLY, never by prefix. "/var" warrants a warning; "/var/www" is
+// the normal thing to serve, and a warning that fires on ordinary use is one
+// people learn to click through — worse than no warning at all.
+var systemDirs = map[string]bool{
+	"/": true, "/home": true, "/root": true, "/etc": true, "/boot": true,
+	"/usr": true, "/var": true, "/opt": true, "/srv": true,
+	"/bin": true, "/sbin": true, "/lib": true,
+}
+
+// TargetRisk is what an about-to-be-served directory actually contains.
+//
+// The danger of a share is in its CONTENTS, not its name: a home directory is
+// obvious, but ~/Projects/app holding a .env is not, and no list of system
+// directories would catch it. Naming the files found is also more persuasive
+// than naming the directory — it says *why* to stop.
+type TargetRisk struct {
+	Entries   int
+	Sensitive []string
+	SystemDir bool
+}
+
+// Risky reports whether anything found warrants a warning block.
+func (r TargetRisk) Risky() bool { return r.SystemDir || len(r.Sensitive) > 0 }
+
+// analyzeTarget inspects a filesystem target. Local filesystem only, and only
+// ever called for ServeFile kinds.
+func analyzeTarget(path string) TargetRisk {
+	var risk TargetRisk
+	if path == "" {
+		return risk
+	}
+	clean := filepath.Clean(path)
+	if systemDirs[clean] {
+		risk.SystemDir = true
+	}
+	if home, err := os.UserHomeDir(); err == nil && clean == filepath.Clean(home) {
+		risk.SystemDir = true
+	}
+	entries, err := os.ReadDir(clean)
+	if err != nil {
+		return risk // a file, or missing: resolveTarget reports that separately
+	}
+	risk.Entries = len(entries)
+	for _, e := range entries {
+		if sensitiveNames[e.Name()] {
+			risk.Sensitive = append(risk.Sensitive, e.Name())
+		}
+	}
+	sort.Strings(risk.Sensitive)
+	return risk
+}
+
+// serveHost returns the full MagicDNS name to build URLs from. The daemon's
+// config key is authoritative when a share already exists; otherwise the local
+// node's DNSName (also the full form) covers adding the very first one.
+func (m Model) serveHost(fromPort string) string {
+	if fromPort != "" {
+		return fromPort
+	}
+	return m.local.DNSName
+}
+
 // serveURL builds the browsable URL for a path. The stored key is used
 // VERBATIM: the daemon writes a directory as "/docs/" and a file as "/motd",
 // and those are not interchangeable for a directory listing.
 func serveURL(host string, port int, path string) string {
 	if host == "" {
+		// Only reachable before the first poll resolves; better an obviously
+		// placeholder URL than a plausible-looking one that does not work.
 		host = "this-node"
 	}
 	if port != 443 {
@@ -92,21 +176,28 @@ func serveURL(host string, port int, path string) string {
 	return fmt.Sprintf("https://%s%s", host, path)
 }
 
-// serveBody renders the port/path tree.
+// serveBody renders the port/path tree above a footer that carries the URL,
+// the scope banner and the keymap. The footer is never scrolled away: on a
+// short terminal the tree is windowed around the cursor instead, because the
+// keymap is the only place the editing keys are advertised.
 func (m Model) serveBody(w int) string {
 	var lines []string
+	cursorLine := 0
 
+	// The empty state must NOT return early: it still needs the keymap (so the
+	// add key is discoverable) and the input field (so pressing it renders).
+	// Returning here made the modal look read-only on any node that happens to
+	// be sharing nothing — which is most of them.
 	if len(m.serve) == 0 {
 		lines = append(lines,
 			modalLine(w, styles.ModalDim.Render("  No services are being shared.")),
 			modalLine(w, ""),
 			modalLine(w, styles.ModalText.Render("  Serve shares a local service with your tailnet over HTTPS.")),
 			modalLine(w, styles.ModalText.Render("  Funnel additionally exposes it to the public internet.")),
+			modalLine(w, ""),
 		)
-		return strings.Join(lines, "\n")
 	}
 
-	host := m.local.Hostname
 	row := 0
 	var highlighted string
 
@@ -121,7 +212,9 @@ func (m Model) serveBody(w int) string {
 			if p.Funnel {
 				plain = "[ PUBLIC ]"
 			}
+			cursorLine = len(lines)
 			lines = append(lines, styles.AccountActive.Render(joinRow(label, plain+" ", w)))
+			highlighted = serveURL(p.Host, p.Port, "/")
 		} else {
 			lines = append(lines, modalRow(w, styles.ModalHeading.Render(label), scope))
 		}
@@ -139,8 +232,9 @@ func (m Model) serveBody(w int) string {
 			}
 			left := fmt.Sprintf("    %-10s %s %s", sp.Path, sp.Kind.Icon(), sp.Target)
 			if m.serveCursor == row {
+				cursorLine = len(lines)
 				lines = append(lines, styles.AccountActive.Render(joinRow(left, "", w)))
-				highlighted = serveURL(host, p.Port, sp.Path)
+				highlighted = serveURL(p.Host, p.Port, sp.Path)
 			} else {
 				lines = append(lines, modalRow(w, styles.ModalText.Render(left), detail))
 			}
@@ -149,30 +243,519 @@ func (m Model) serveBody(w int) string {
 		lines = append(lines, modalLine(w, ""))
 	}
 
-	if highlighted != "" {
-		lines = append(lines, modalDivider(w), modalLine(w, styles.ModalAccent.Render("  "+highlighted)))
-	}
-	// Close is advertised by the modal chrome; repeating it here just doubles
-	// the hint on screen.
-	lines = append(lines, modalDivider(w), modalLine(w, accountKey("J/K", "NAVIGATE", false)))
+	// The scope of whatever is highlighted drives both the banner below and the
+	// keymap: "[SPACE] TAILNET/PUBLIC" named a toggle without ever saying which
+	// side you were on, so the way back from public was invisible.
+	hlPort, _, hlOK := m.serveRowAt(m.serveCursor)
+	hlPublic := hlOK && hlPort.Funnel
 
-	return strings.Join(lines, "\n")
+	var foot []string
+	if highlighted != "" {
+		foot = append(foot, modalDivider(w),
+			modalRow(w, styles.ModalAccent.Render("  "+highlighted),
+				styles.ModalDim.Render("[c] copy ")))
+		if hlPublic {
+			// Two short lines rather than one long one: it fits the narrowest
+			// modal without wrapping, and the extra row is what makes the way
+			// back catch the eye at all.
+			foot = append(foot,
+				modalLine(w, styles.StatusErr.Render("  ⚠ PUBLIC")+
+					styles.ModalText.Render(" — reachable from the internet.")),
+				modalLine(w, styles.ModalText.Render("    ")+
+					styles.ModalKey.Render("[SPACE]")+
+					styles.ModalText.Render(" makes it tailnet-only again.")))
+		}
+	}
+	foot = append(foot, modalDivider(w))
+	if m.serveInputMode {
+		prompt := "Share what?  (port, path, URL, or text:…)"
+		if m.serveInputErr {
+			prompt = "Enter something to share — port, path, URL or text:…"
+		}
+		style := styles.ModalHeading
+		if m.serveInputErr {
+			style = styles.StatusErr
+		}
+		foot = append(foot, modalLine(w, style.Render("  "+prompt)),
+			modalLine(w, m.serveInput.View()))
+		// The same space does double duty: examples while the field is empty,
+		// then what the typed target actually resolves to. No key to discover —
+		// you are in this field precisely because you do not yet know what to
+		// type, so hiding the examples behind a shortcut helps nobody.
+		if _, detail := classifyTarget(m.serveInput.Value()); detail != "" {
+			foot = append(foot, modalLine(w, styles.ModalDim.Render("  → "+detail)))
+		} else {
+			// Left-align both columns: modalRow right-justifies, which leaves
+			// the notes ragged and harder to scan than a plain padded column.
+			for _, ex := range serveExamples {
+				foot = append(foot, modalLine(w,
+					styles.ModalAccent.Render("    "+fmt.Sprintf("%-20s", ex.target))+
+						styles.ModalDim.Render(ex.note)))
+			}
+		}
+		foot = append(foot, modalDivider(w),
+			gridLine(w, accountKey("ENTER", "CONFIRM", false), accountKey("ESC", "CANCEL", false)))
+	} else if len(m.serve) == 0 {
+		// Refresh matters most here: "nothing is shared" is also what a stale
+		// view looks like from the outside.
+		foot = append(foot, gridLine(w,
+			accountKey("A", "ADD A SERVICE", false), accountKey("R", "REFRESH", false)))
+	} else {
+		// Green, not red: making something private is the safe direction, and
+		// the label has to name it outright for the exit to be findable.
+		scopeKey := accountKey("SPACE", "MAKE PUBLIC", false)
+		if hlPublic {
+			scopeKey = styles.ModalKey.Render("[SPACE]") +
+				styles.ModalText.Render(" ") +
+				styles.StatusOK.Render("MAKE PRIVATE")
+		}
+		foot = append(foot,
+			gridLine(w, accountKey("J/K", "NAVIGATE", false), accountKey("A", "ADD", false)),
+			gridLine(w, scopeKey, accountKey("D", "REMOVE", false)),
+			gridLine(w, accountKey("C", "COPY URL", false), accountKey("R", "REFRESH", false)),
+			gridLine(w, accountKey("ESC", "CLOSE", false), ""))
+		if m.serveCopied {
+			foot = append(foot, modalLine(w, styles.StatusOK.Render("  ✓ URL copied to clipboard!")))
+		}
+	}
+
+	return strings.Join(append(windowLines(lines, cursorLine, m.serveListBudget(len(foot)), w), foot...), "\n")
+}
+
+// serveListBudget is how many tree rows fit once the footer has taken its
+// share of the modal. The footer wins: a clipped keymap hides the only hint
+// that the modal can be edited at all.
+func (m Model) serveListBudget(footLines int) int {
+	return overlayHeight(m.height, 1<<20) - footLines
+}
+
+// windowLines scrolls a block around a cursor row, marking whatever it cut.
+// Silent truncation would be worse than the clipping it replaces.
+func windowLines(lines []string, cursorLine, budget, w int) []string {
+	if budget < 1 {
+		budget = 1
+	}
+	if len(lines) <= budget {
+		return lines
+	}
+	start := cursorLine - budget/2
+	if start < 0 {
+		start = 0
+	}
+	if start+budget > len(lines) {
+		start = len(lines) - budget
+	}
+	end := start + budget
+	// The marker rows overwrite a real row, so nudge the window if that row is
+	// the cursor — losing the highlight is exactly what this must not do.
+	if start > 0 && cursorLine == start && start+1+budget <= len(lines) {
+		start++
+		end++
+	}
+	if end < len(lines) && cursorLine == end-1 && start > 0 {
+		start--
+		end--
+	}
+	out := append([]string(nil), lines[start:end]...)
+	if start > 0 {
+		out[0] = modalLine(w, styles.ModalDim.Render(fmt.Sprintf("  ⋯ %d more above", start)))
+	}
+	if end < len(lines) {
+		out[len(out)-1] = modalLine(w, styles.ModalDim.Render(fmt.Sprintf("  ⋯ %d more below", len(lines)-end)))
+	}
+	return out
 }
 
 // updateServeList handles navigation. Read-only: no add, remove or scope
 // toggle this phase, so every other key is swallowed rather than acted on.
-func (m Model) updateServeList(key string) (Model, bool) {
+func (m Model) updateServeList(key string) (Model, tea.Cmd, bool) {
 	switch key {
 	case "j", "down":
 		if m.serveCursor < m.serveItemCount()-1 {
 			m.serveCursor++
 		}
-		return m, true
+		return m, nil, true
 	case "k", "up":
 		if m.serveCursor > 0 {
 			m.serveCursor--
 		}
-		return m, true
+		return m, nil, true
+
+	case "c", "C":
+		// Copy the browsable URL of whatever is highlighted. Built from the
+		// daemon's own host, so it is the link you can actually paste to
+		// someone rather than a reconstructed guess.
+		port, pathIdx, ok := m.serveRowAt(m.serveCursor)
+		if !ok {
+			return m, nil, true
+		}
+		path := "/"
+		if pathIdx >= 0 {
+			path = port.Paths[pathIdx].Path
+		}
+		return m, copyCmd(clipboardServe, serveURL(port.Host, port.Port, path)), true
+
+	case "r", "R":
+		// Re-read the daemon on demand. Everything here already refetches after
+		// an action, but that is invisible from the outside — and it cannot
+		// catch a change made from another terminal or session at all.
+		return m, refreshServeCmd(), true
+
+	case "a":
+		m.serveInputMode = true
+		m.serveInputErr = false
+		m.serveInput = newServeInput()
+		m.serveInput.Width = clampInputWidth(overlayWidth(m.width))
+		m.serveInput.Focus()
+		return m, nil, true
+
+	case "d":
+		port, pathIdx, ok := m.serveRowAt(m.serveCursor)
+		if !ok {
+			return m, nil, true
+		}
+		p := servePendingAction{host: m.serveHost(port.Host), port: port.Port, paths: port.Paths}
+		if pathIdx < 0 {
+			// A port row: removing it unmounts every path on it.
+			p.action, p.path = tailscale.ServeRemovePort, "/"
+		} else {
+			p.action = tailscale.ServeRemovePath
+			p.path = port.Paths[pathIdx].Path
+			p.kind = port.Paths[pathIdx].Kind
+		}
+		m.servePending = p
+		m.state = stateServeConfirm
+		m.serveCopied = false
+		return m, nil, true
+
+	case " ", "space":
+		// Scope belongs to the PORT: AllowFunnel is keyed by host:port, so a
+		// path row has no scope of its own. It still toggles its parent port
+		// rather than being a dead key on the row the user is most likely
+		// sitting on — the confirmation names that port and every path on it.
+		port, _, ok := m.serveRowAt(m.serveCursor)
+		if !ok || len(port.Paths) == 0 {
+			return m, nil, true
+		}
+		// Re-issuing the command needs the original target — and for
+		// unpublish it MUST be `serve`, never `funnel ... off`, which would
+		// delete the share rather than making it private.
+		first := port.Paths[0]
+		action := tailscale.ServePublish
+		if port.Funnel {
+			action = tailscale.ServeUnpublish
+		}
+		m.servePending = servePendingAction{
+			action: action, host: m.serveHost(port.Host), port: port.Port, path: first.Path,
+			target: serveTargetArg(first), kind: first.Kind, paths: port.Paths,
+		}
+		m.state = stateServeConfirm
+		m.serveCopied = false
+		return m, nil, true
 	}
-	return m, false
+	return m, nil, false
+}
+
+// serveSummary describes the whole config in one line, for the log receipt a
+// manual refresh leaves behind. Public ports are called out separately because
+// that is the number worth re-reading.
+func serveSummary(ports []types.ServePort) string {
+	if len(ports) == 0 {
+		return "nothing is shared"
+	}
+	paths, public := 0, 0
+	for _, p := range ports {
+		paths += len(p.Paths)
+		if p.Funnel {
+			public++
+		}
+	}
+	out := plural(len(ports), "port") + ", " + plural(paths, "path")
+	if public > 0 {
+		return out + fmt.Sprintf(", %d public", public)
+	}
+	return out + ", none public"
+}
+
+func plural(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
+}
+
+// serveTargetArg turns a parsed path back into the argument form the CLI
+// expects, which is not always how it is stored: a text handler stores the
+// literal but must be passed back as "text:<literal>".
+func serveTargetArg(sp types.ServePath) string {
+	if sp.Kind == types.ServeText {
+		return "text:" + sp.Target
+	}
+	return sp.Target
+}
+
+// --- editing -----------------------------------------------------------------
+
+// serveRowAt maps a cursor index onto the port/path tree. pathIdx is -1 when
+// the cursor is on a port row.
+func (m Model) serveRowAt(idx int) (port types.ServePort, pathIdx int, ok bool) {
+	row := 0
+	for _, p := range m.serve {
+		if row == idx {
+			return p, -1, true
+		}
+		row++
+		for i := range p.Paths {
+			if row == idx {
+				return p, i, true
+			}
+			row++
+		}
+	}
+	return types.ServePort{}, -1, false
+}
+
+// serveExamples covers all three target kinds, so the field teaches the format
+// rather than assuming it is known.
+var serveExamples = []struct{ target, note string }{
+	{"3000", "a local server on port 3000"},
+	{"/srv/docs", "a directory  (needs sudo)"},
+	{"text:back at 14:00", "a literal message"},
+}
+
+// newServeInput builds the target editor, inheriting the shared styling
+// contract (no placeholder, visible cursor) from newModalInput.
+func newServeInput() textinput.Model { return newModalInput(128) }
+
+// classifyTarget reports what a typed target will become, so the add field can
+// say so before the user commits. This is the same "name the contents, not the
+// port" principle the confirmation uses.
+func classifyTarget(raw string) (types.ServeKind, string) {
+	t := strings.TrimSpace(raw)
+	switch {
+	case t == "":
+		return types.ServeProxy, ""
+	case strings.HasPrefix(t, "text:"):
+		return types.ServeText, "literal text"
+	case isFilesystemTarget(t):
+		detail, _ := resolveTarget(t)
+		return types.ServeFile, detail
+	default:
+		return types.ServeProxy, "proxy to " + t
+	}
+}
+
+// isFilesystemTarget mirrors the adapter's rule: bare paths are filesystem
+// targets, anything with a supported scheme (except unix:) is not.
+func isFilesystemTarget(t string) bool {
+	for _, scheme := range []string{"http://", "https://", "https+insecure://"} {
+		if strings.HasPrefix(t, scheme) {
+			return false
+		}
+	}
+	return strings.HasPrefix(t, "/") || strings.HasPrefix(t, "./") ||
+		strings.HasPrefix(t, "~") || strings.HasPrefix(t, "unix:")
+}
+
+// pathExists reports whether a mount point is already taken on a port. Adding
+// an existing path is an UPSERT — the daemon replaces it silently — so the UI
+// warns rather than letting a share vanish.
+func (m Model) pathExists(port int, path string) bool {
+	want := tailscale.NormalizeServePath(path)
+	for _, p := range m.serve {
+		if p.Port != port {
+			continue
+		}
+		for _, sp := range p.Paths {
+			if tailscale.NormalizeServePath(sp.Path) == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// updateServeInput owns every key while a target is being typed, including
+// esc/q — so a target containing a "q" survives and the global close handler
+// cannot fire mid-entry.
+func (m Model) updateServeInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		raw := strings.TrimSpace(m.serveInput.Value())
+		if raw == "" {
+			m.serveInputErr = true
+			return m, nil
+		}
+		kind, _ := classifyTarget(raw)
+		port, path, host := 443, "/", m.local.DNSName
+		if p, _, ok := m.serveRowAt(m.serveCursor); ok {
+			port = p.Port
+			host = m.serveHost(p.Host)
+		}
+		m.servePending = servePendingAction{
+			action: tailscale.ServeAdd, host: host,
+			port: port, path: path, target: raw, kind: kind,
+		}
+		m.serveInputMode = false
+		m.serveInput.Blur()
+		m.state = stateServeConfirm
+		m.serveCopied = false
+		return m, nil
+	case "esc":
+		m.serveInputMode = false
+		m.serveInputErr = false
+		m.serveInput.Blur()
+		m.serveInput.SetValue("")
+		return m.resizeOverlay(), nil
+	}
+	var cmd tea.Cmd
+	m.serveInput, cmd = m.serveInput.Update(msg)
+	m.serveInputErr = false
+	return m.resizeOverlay(), cmd
+}
+
+// updateServeConfirm handles the Command Room. Enter applies, c copies, Esc
+// returns to the list without acting.
+func (m Model) updateServeConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	p := m.servePending
+	switch msg.String() {
+	case "enter":
+		// Close before dispatch (the Phase 24.1 lesson): a path target hands
+		// the terminal to sudo, and the last drawn frame must not be a modal.
+		m.state = stateMain
+		return m, serveApplyCmd(p)
+	case "c", "C":
+		return m, copyCmd(clipboardServe,
+			tailscale.ServeCommandString(p.action, p.port, p.path, p.target))
+	case "esc", "q":
+		m.state = stateServe
+		m.serveCopied = false
+		return m.resizeOverlay(), nil
+	}
+	return m, nil
+}
+
+// renderServeConfirmOverlay draws the Command Room for a pending edit.
+//
+// Two INDEPENDENT risks get two independent warning blocks, because they are
+// genuinely different questions: *what* is being exposed, and *to whom*. The
+// worst case — a directory full of credentials going public — shows both.
+//
+// Friction is asymmetric on purpose. Publishing warns loudly; unpublishing,
+// removing, or serving an ordinary port is a quiet confirmation. A warning
+// that fires on every action is one people learn to click through.
+func (m Model) renderServeConfirmOverlay(base string) string {
+	w := overlayWidth(m.width)
+	p := m.servePending
+	cmd := tailscale.ServeCommandString(p.action, p.port, p.path, p.target)
+
+	title := "[ CONFIRM SERVE CHANGE ]"
+	if p.action == tailscale.ServePublish {
+		title = "[ CONFIRM PUBLIC EXPOSURE ]"
+	}
+
+	lines := []string{
+		modalLine(w, lipgloss.PlaceHorizontal(w, lipgloss.Center,
+			styles.ModalTitle.Render(title),
+			lipgloss.WithWhitespaceBackground(styles.Surface))),
+		modalDivider(w),
+	}
+
+	warn := lipgloss.NewStyle().Foreground(styles.Subtle).Background(styles.Surface).Italic(true)
+
+	// --- risk 1: what is being exposed -------------------------------------
+	if p.kind == types.ServeFile {
+		if risk := analyzeTarget(p.target); risk.Risky() {
+			lines = append(lines,
+				modalLine(w, styles.StatusErr.Render("⚠  THIS DIRECTORY CONTAINS SENSITIVE FILES")),
+				modalLine(w, ""))
+			detail, _ := resolveTarget(p.target)
+			// Wrap explicitly: a long path plus its resolution easily exceeds
+			// the modal width, and modalLine clips rather than wraps.
+			for _, ln := range wrapText(p.target+"  —  "+detail, w-4) {
+				lines = append(lines, modalLine(w, styles.ModalText.Render("   "+ln)))
+			}
+			if len(risk.Sensitive) > 0 {
+				lines = append(lines, modalLine(w,
+					styles.StatusErr.Render("   Found:  "+strings.Join(risk.Sensitive, "   "))))
+			}
+			if risk.SystemDir {
+				lines = append(lines, modalLine(w,
+					styles.ModalText.Render("   This is a system or home directory.")))
+			}
+			for _, ln := range wrapText("Serving it publishes every file beneath it.", w-3) {
+				lines = append(lines, modalLine(w, warn.Render("   "+ln)))
+			}
+			lines = append(lines, modalLine(w, ""))
+		}
+	}
+
+	// --- risk 2: who can reach it ------------------------------------------
+	if p.action == tailscale.ServePublish {
+		lines = append(lines,
+			modalLine(w, styles.StatusErr.Render("⚠  REACHABLE FROM THE PUBLIC INTERNET")),
+			modalLine(w, ""))
+		blast := fmt.Sprintf("   Port %d becomes public, including all %d path(s) on it:",
+			p.port, len(p.paths))
+		lines = append(lines, modalLine(w, styles.ModalText.Render(blast)))
+		for _, sp := range p.paths {
+			lines = append(lines, modalLine(w, styles.ModalText.Render(
+				fmt.Sprintf("      %-10s %s %s", sp.Path, sp.Kind.Icon(), sp.Target))))
+		}
+		for _, ln := range wrapText("Anyone with the URL can reach them. No tailnet membership, no authentication.", w-3) {
+			lines = append(lines, modalLine(w, warn.Render("   "+ln)))
+		}
+		lines = append(lines, modalLine(w, ""))
+	}
+
+	// --- upsert warning ----------------------------------------------------
+	if p.action == tailscale.ServeAdd && m.pathExists(p.port, p.path) {
+		lines = append(lines, modalLine(w, styles.StatusWarn.Render(
+			fmt.Sprintf("⚠  This REPLACES the existing %s on :%d.", p.path, p.port))),
+			modalLine(w, ""))
+	}
+
+	lines = append(lines, modalLine(w, styles.ModalDim.Render("ABOUT TO EXECUTE:")))
+	for _, ln := range wrapCommand(cmd, w) {
+		lines = append(lines, modalLine(w, styles.ModalAccent.Render(ln)))
+	}
+
+	if tailscale.ServeNeedsRoot(p.action, p.target) {
+		lines = append(lines, modalLine(w, ""),
+			modalLine(w, warn.Render("   Serving a filesystem path requires root; you will be")),
+			modalLine(w, warn.Render("   prompted for your password.")))
+	}
+
+	if p.action == tailscale.ServePublish {
+		lines = append(lines, modalLine(w, ""),
+			modalLine(w, styles.ModalDim.Render("Public URL:")),
+			modalLine(w, styles.ModalAccent.Render(serveURL(p.host, p.port, p.path))))
+	}
+
+	apply := "APPLY"
+	if p.action == tailscale.ServePublish {
+		apply = "EXPOSE PUBLICLY"
+	}
+	lines = append(lines, modalDivider(w),
+		gridLine(w, accountKey("ENTER", apply, p.action == tailscale.ServePublish),
+			accountKey("C", "COPY", false)),
+		modalLine(w, accountKey("ESC", "BACK", false)))
+
+	if m.serveCopied {
+		lines = append(lines, modalLine(w, styles.StatusOK.Render("✓ Copied to clipboard!")))
+	}
+
+	inner := strings.Join(lines, "\n")
+	modal := lipgloss.NewStyle().
+		Width(w+2*modalHPad).
+		Height(countLines(inner)+2*modalVPad).
+		Background(styles.Surface).
+		Foreground(styles.Fg).
+		Padding(modalVPad, modalHPad).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(styles.Primary).
+		BorderBackground(styles.Surface).
+		Render(inner)
+
+	return overlayCenter(base, modal)
 }

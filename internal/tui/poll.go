@@ -201,6 +201,7 @@ type clipboardKind int
 const (
 	clipboardRouting clipboardKind = iota
 	clipboardSSH
+	clipboardServe
 )
 
 // clipboardMsg carries the result of a copy-to-clipboard action.
@@ -219,19 +220,64 @@ func copyCmd(kind clipboardKind, text string) tea.Cmd {
 }
 
 // serveMsg carries the result of a `tailscale serve status --json` fetch.
+// `manual` marks a user-requested refresh, which is the only kind that logs on
+// success: the automatic fetches (startup, modal open, post-action) would
+// otherwise narrate themselves, and a log line nobody asked for is noise.
 type serveMsg struct {
-	ports []types.ServePort
-	err   error
+	ports  []types.ServePort
+	manual bool
+	err    error
 }
 
 // fetchServeCmd reads the live Serve/Funnel configuration off the UI thread.
 // An unconfigured node is an empty list, not an error.
-func fetchServeCmd() tea.Cmd {
+func fetchServeCmd() tea.Cmd { return serveFetch(false) }
+
+// refreshServeCmd is the same read, attributed to the user so it leaves a
+// receipt in the log ring. That receipt is the point: it is how you tell an
+// entry that really went away from a row that merely vanished from the view.
+func refreshServeCmd() tea.Cmd { return serveFetch(true) }
+
+func serveFetch(manual bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		ports, err := tailscale.ServeStatus(ctx)
-		return serveMsg{ports: ports, err: err}
+		return serveMsg{ports: ports, manual: manual, err: err}
+	}
+}
+
+// serveActionMsg is delivered after a Serve/Funnel edit finishes.
+type serveActionMsg struct {
+	desc string
+	err  error
+}
+
+// serveApplyCmd runs one Serve/Funnel edit.
+//
+// Filesystem targets are PRIVILEGED — the daemon refuses them unless the
+// caller is root — so those go through tea.ExecProcess with sudo, giving the
+// password prompt a real terminal. Ports and text need no elevation and stay
+// background commands, so the common case never flashes a sudo prompt.
+func serveApplyCmd(p servePendingAction) tea.Cmd {
+	args := tailscale.ServeArgs(p.action, p.port, p.path, p.target)
+	desc := tailscale.ServeCommandString(p.action, p.port, p.path, p.target)
+
+	if tailscale.MockEnabled() {
+		return func() tea.Msg { return serveActionMsg{desc: desc + " (mock)"} }
+	}
+
+	if tailscale.ServeNeedsRoot(p.action, p.target) {
+		c := exec.Command("sudo", append([]string{"tailscale"}, args...)...)
+		return tea.ExecProcess(c, func(err error) tea.Msg {
+			return serveActionMsg{desc: desc, err: err}
+		})
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return serveActionMsg{desc: desc, err: tailscale.ApplyServe(ctx, args)}
 	}
 }
 
