@@ -176,9 +176,13 @@ func serveURL(host string, port int, path string) string {
 	return fmt.Sprintf("https://%s%s", host, path)
 }
 
-// serveBody renders the port/path tree.
+// serveBody renders the port/path tree above a footer that carries the URL,
+// the scope banner and the keymap. The footer is never scrolled away: on a
+// short terminal the tree is windowed around the cursor instead, because the
+// keymap is the only place the editing keys are advertised.
 func (m Model) serveBody(w int) string {
 	var lines []string
+	cursorLine := 0
 
 	// The empty state must NOT return early: it still needs the keymap (so the
 	// add key is discoverable) and the input field (so pressing it renders).
@@ -208,6 +212,7 @@ func (m Model) serveBody(w int) string {
 			if p.Funnel {
 				plain = "[ PUBLIC ]"
 			}
+			cursorLine = len(lines)
 			lines = append(lines, styles.AccountActive.Render(joinRow(label, plain+" ", w)))
 			highlighted = serveURL(p.Host, p.Port, "/")
 		} else {
@@ -227,6 +232,7 @@ func (m Model) serveBody(w int) string {
 			}
 			left := fmt.Sprintf("    %-10s %s %s", sp.Path, sp.Kind.Icon(), sp.Target)
 			if m.serveCursor == row {
+				cursorLine = len(lines)
 				lines = append(lines, styles.AccountActive.Render(joinRow(left, "", w)))
 				highlighted = serveURL(p.Host, p.Port, sp.Path)
 			} else {
@@ -237,12 +243,30 @@ func (m Model) serveBody(w int) string {
 		lines = append(lines, modalLine(w, ""))
 	}
 
+	// The scope of whatever is highlighted drives both the banner below and the
+	// keymap: "[SPACE] TAILNET/PUBLIC" named a toggle without ever saying which
+	// side you were on, so the way back from public was invisible.
+	hlPort, _, hlOK := m.serveRowAt(m.serveCursor)
+	hlPublic := hlOK && hlPort.Funnel
+
+	var foot []string
 	if highlighted != "" {
-		lines = append(lines, modalDivider(w),
+		foot = append(foot, modalDivider(w),
 			modalRow(w, styles.ModalAccent.Render("  "+highlighted),
 				styles.ModalDim.Render("[c] copy ")))
+		if hlPublic {
+			// Two short lines rather than one long one: it fits the narrowest
+			// modal without wrapping, and the extra row is what makes the way
+			// back catch the eye at all.
+			foot = append(foot,
+				modalLine(w, styles.StatusErr.Render("  ⚠ PUBLIC")+
+					styles.ModalText.Render(" — reachable from the internet.")),
+				modalLine(w, styles.ModalText.Render("    ")+
+					styles.ModalKey.Render("[SPACE]")+
+					styles.ModalText.Render(" makes it tailnet-only again.")))
+		}
 	}
-	lines = append(lines, modalDivider(w))
+	foot = append(foot, modalDivider(w))
 	if m.serveInputMode {
 		prompt := "Share what?  (port, path, URL, or text:…)"
 		if m.serveInputErr {
@@ -252,38 +276,90 @@ func (m Model) serveBody(w int) string {
 		if m.serveInputErr {
 			style = styles.StatusErr
 		}
-		lines = append(lines, modalLine(w, style.Render("  "+prompt)),
+		foot = append(foot, modalLine(w, style.Render("  "+prompt)),
 			modalLine(w, m.serveInput.View()))
 		// The same space does double duty: examples while the field is empty,
 		// then what the typed target actually resolves to. No key to discover —
 		// you are in this field precisely because you do not yet know what to
 		// type, so hiding the examples behind a shortcut helps nobody.
 		if _, detail := classifyTarget(m.serveInput.Value()); detail != "" {
-			lines = append(lines, modalLine(w, styles.ModalDim.Render("  → "+detail)))
+			foot = append(foot, modalLine(w, styles.ModalDim.Render("  → "+detail)))
 		} else {
 			// Left-align both columns: modalRow right-justifies, which leaves
 			// the notes ragged and harder to scan than a plain padded column.
 			for _, ex := range serveExamples {
-				lines = append(lines, modalLine(w,
+				foot = append(foot, modalLine(w,
 					styles.ModalAccent.Render("    "+fmt.Sprintf("%-20s", ex.target))+
 						styles.ModalDim.Render(ex.note)))
 			}
 		}
-		lines = append(lines, modalDivider(w),
+		foot = append(foot, modalDivider(w),
 			gridLine(w, accountKey("ENTER", "CONFIRM", false), accountKey("ESC", "CANCEL", false)))
 	} else if len(m.serve) == 0 {
-		lines = append(lines, modalLine(w, accountKey("A", "ADD A SERVICE", false)))
+		foot = append(foot, modalLine(w, accountKey("A", "ADD A SERVICE", false)))
 	} else {
-		lines = append(lines,
+		// Green, not red: making something private is the safe direction, and
+		// the label has to name it outright for the exit to be findable.
+		scopeKey := accountKey("SPACE", "MAKE PUBLIC", false)
+		if hlPublic {
+			scopeKey = styles.ModalKey.Render("[SPACE]") +
+				styles.ModalText.Render(" ") +
+				styles.StatusOK.Render("MAKE PRIVATE")
+		}
+		foot = append(foot,
 			gridLine(w, accountKey("J/K", "NAVIGATE", false), accountKey("A", "ADD", false)),
-			gridLine(w, accountKey("SPACE", "TAILNET/PUBLIC", false), accountKey("D", "REMOVE", false)),
+			gridLine(w, scopeKey, accountKey("D", "REMOVE", false)),
 			gridLine(w, accountKey("C", "COPY URL", false), accountKey("ESC", "CLOSE", false)))
 		if m.serveCopied {
-			lines = append(lines, modalLine(w, styles.StatusOK.Render("  ✓ URL copied to clipboard!")))
+			foot = append(foot, modalLine(w, styles.StatusOK.Render("  ✓ URL copied to clipboard!")))
 		}
 	}
 
-	return strings.Join(lines, "\n")
+	return strings.Join(append(windowLines(lines, cursorLine, m.serveListBudget(len(foot)), w), foot...), "\n")
+}
+
+// serveListBudget is how many tree rows fit once the footer has taken its
+// share of the modal. The footer wins: a clipped keymap hides the only hint
+// that the modal can be edited at all.
+func (m Model) serveListBudget(footLines int) int {
+	return overlayHeight(m.height, 1<<20) - footLines
+}
+
+// windowLines scrolls a block around a cursor row, marking whatever it cut.
+// Silent truncation would be worse than the clipping it replaces.
+func windowLines(lines []string, cursorLine, budget, w int) []string {
+	if budget < 1 {
+		budget = 1
+	}
+	if len(lines) <= budget {
+		return lines
+	}
+	start := cursorLine - budget/2
+	if start < 0 {
+		start = 0
+	}
+	if start+budget > len(lines) {
+		start = len(lines) - budget
+	}
+	end := start + budget
+	// The marker rows overwrite a real row, so nudge the window if that row is
+	// the cursor — losing the highlight is exactly what this must not do.
+	if start > 0 && cursorLine == start && start+1+budget <= len(lines) {
+		start++
+		end++
+	}
+	if end < len(lines) && cursorLine == end-1 && start > 0 {
+		start--
+		end--
+	}
+	out := append([]string(nil), lines[start:end]...)
+	if start > 0 {
+		out[0] = modalLine(w, styles.ModalDim.Render(fmt.Sprintf("  ⋯ %d more above", start)))
+	}
+	if end < len(lines) {
+		out[len(out)-1] = modalLine(w, styles.ModalDim.Render(fmt.Sprintf("  ⋯ %d more below", len(lines)-end)))
+	}
+	return out
 }
 
 // updateServeList handles navigation. Read-only: no add, remove or scope
@@ -344,9 +420,11 @@ func (m Model) updateServeList(key string) (Model, tea.Cmd, bool) {
 
 	case " ", "space":
 		// Scope belongs to the PORT: AllowFunnel is keyed by host:port, so a
-		// path row has no scope of its own to toggle.
-		port, pathIdx, ok := m.serveRowAt(m.serveCursor)
-		if !ok || pathIdx >= 0 || len(port.Paths) == 0 {
+		// path row has no scope of its own. It still toggles its parent port
+		// rather than being a dead key on the row the user is most likely
+		// sitting on — the confirmation names that port and every path on it.
+		port, _, ok := m.serveRowAt(m.serveCursor)
+		if !ok || len(port.Paths) == 0 {
 			return m, nil, true
 		}
 		// Re-issuing the command needs the original target — and for

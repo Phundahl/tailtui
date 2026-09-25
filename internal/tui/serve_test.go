@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/Phundahl/tailtui/internal/tailscale"
 	"github.com/Phundahl/tailtui/internal/types"
 )
@@ -214,14 +216,77 @@ func TestServeEditKeysOpenConfirm(t *testing.T) {
 	}
 }
 
-// Scope belongs to the port. A path row has no funnel flag of its own, so
-// Space there must do nothing rather than silently act on the parent port.
-func TestServeSpaceOnlyActsOnPortRows(t *testing.T) {
-	m := openServeModal(t, 120, 40, servePorts())
-	m.serveCursor = 1 // a path row
-	m2, _ := m.Update(key("space"))
-	if got := m2.(Model).state; got != stateServe {
-		t.Fatalf("Space on a path row opened %v; scope is a port-level property", got)
+// Scope belongs to the port, but a path row still toggles its parent rather
+// than being a dead key — that silent no-op sat on the rows users navigate to
+// most, and made the way back from public look absent.
+func TestServeSpaceActsOnTheParentPort(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cursor int
+		want   tailscale.ServeAction
+		port   int
+	}{
+		{"path under a public port", 1, tailscale.ServeUnpublish, 443},
+		{"path under a tailnet-only port", 4, tailscale.ServePublish, 8443},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := openServeModal(t, 120, 40, servePorts())
+			m.serveCursor = tc.cursor
+			got := mustModel(m.Update(key("space")))
+			if got.state != stateServeConfirm {
+				t.Fatalf("Space on a path row did nothing (state=%v)", got.state)
+			}
+			if got.servePending.action != tc.want || got.servePending.port != tc.port {
+				t.Fatalf("staged %v on :%d, want %v on :%d",
+					got.servePending.action, got.servePending.port, tc.want, tc.port)
+			}
+		})
+	}
+}
+
+// The exit from public has to be named, not implied. A toggle label reading
+// "TAILNET/PUBLIC" never said which side the highlighted row was on.
+func TestServeScopeAffordanceNamesTheDirection(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cursor  int
+		want    string
+		notWant string
+		banner  bool
+	}{
+		{"public port", 0, "MAKE PRIVATE", "MAKE PUBLIC", true},
+		{"path under a public port", 2, "MAKE PRIVATE", "MAKE PUBLIC", true},
+		{"tailnet-only port", 3, "MAKE PUBLIC", "MAKE PRIVATE", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := openServeModal(t, 120, 40, servePorts())
+			for i := 0; i < tc.cursor; i++ { // navigate for real, so the re-render path runs
+				m = mustModel(m.Update(key("j")))
+			}
+			v := m.View()
+			if !strings.Contains(v, tc.want) {
+				t.Fatalf("keymap does not offer %q", tc.want)
+			}
+			if strings.Contains(v, tc.notWant) {
+				t.Fatalf("keymap still offers %q on a %s", tc.notWant, tc.name)
+			}
+			if got := strings.Contains(v, "⚠ PUBLIC"); got != tc.banner {
+				t.Fatalf("public banner present=%v, want %v", got, tc.banner)
+			}
+			assertFlush(t, v, 120, 40)
+
+			// The banner is two short lines precisely so it survives the
+			// narrowest modal without wrapping.
+			narrow := openServeModal(t, 72, 24, servePorts())
+			for i := 0; i < tc.cursor; i++ {
+				narrow = mustModel(narrow.Update(key("j")))
+			}
+			nv := narrow.View()
+			if !strings.Contains(nv, tc.want) {
+				t.Fatalf("keymap does not offer %q at 72x24", tc.want)
+			}
+			assertFlush(t, nv, 72, 24)
+		})
 	}
 }
 
@@ -707,3 +772,35 @@ func TestConfirmURLFallsBackToLocalDNSName(t *testing.T) {
 		t.Fatalf("host fallback = %q, want the local DNSName", got.servePending.host)
 	}
 }
+
+// The keymap is the only advertisement that the modal can be edited, so a
+// short terminal must window the tree rather than clip the footer away.
+func TestServeFooterSurvivesAShortTerminal(t *testing.T) {
+	ports := servePorts()
+	// More rows than an 80x24 modal can hold, so windowing has to kick in.
+	for i := 0; i < 6; i++ {
+		ports = append(ports, types.ServePort{
+			Port: 9000 + i, HTTPS: true,
+			Paths: []types.ServePath{{Path: "/", Kind: types.ServeProxy, Target: "http://127.0.0.1:1234"}},
+		})
+	}
+	m := openServeModal(t, 80, 24, ports)
+	v := m.View()
+	for _, want := range []string{"[SPACE] MAKE PRIVATE", "[C] COPY URL", "⋯", "⚠ PUBLIC"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("footer lost %q on a short terminal", want)
+		}
+	}
+	assertFlush(t, v, 80, 24)
+
+	// And the highlighted row stays on screen all the way down the tree.
+	for i := 0; i < m.serveItemCount()-1; i++ {
+		m = mustModel(m.Update(key("j")))
+		if !strings.Contains(m.View(), "[J/K] NAVIGATE") {
+			t.Fatalf("keymap clipped at cursor %d", m.serveCursor)
+		}
+	}
+}
+
+// mustModel unwraps the tea.Model an Update returns.
+func mustModel(m tea.Model, _ tea.Cmd) Model { return m.(Model) }

@@ -60,7 +60,9 @@ Every release is in **[CHANGELOG.md](CHANGELOG.md)**.
   inspected first, so sharing one that contains `.ssh` or `.env` says so in as
   many words, and going public lists every path on that port. Anything live and
   public is flagged in red on the dashboard, because the real hazard is
-  forgetting a Funnel is still running.
+  forgetting a Funnel is still running — and on a public entry the modal says
+  so outright, with `[SPACE] MAKE PRIVATE` naming the way back instead of
+  leaving you to infer it from a generic toggle label.
 - **Live, multi-row latency graphing.** Select any peer and watch a real-time
   vertical bar chart of round-trip latency (`tailscale ping`), color-graded by
   severity, with live MIN / AVG / MAX. The chart grows to fill the pane.

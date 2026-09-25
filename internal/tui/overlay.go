@@ -357,8 +357,9 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Esc/q (handled above) close it.
 		return m.updateRoutingList(key)
 	case stateServe:
-		// Read-only this phase: navigation only. Every other key is swallowed
-		// so nothing falls through to the peer list behind the modal.
+		// Navigation plus the editing keys, which stage an action and hand off
+		// to the Command Room. Every other key is swallowed so nothing falls
+		// through to the peer list behind the modal.
 		if nm, cmd, handled := m.updateServeList(key); handled {
 			return nm.resizeOverlay(), cmd
 		}
