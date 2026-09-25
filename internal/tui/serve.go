@@ -151,6 +151,16 @@ func analyzeTarget(path string) TargetRisk {
 	return risk
 }
 
+// serveHost returns the full MagicDNS name to build URLs from. The daemon's
+// config key is authoritative when a share already exists; otherwise the local
+// node's DNSName (also the full form) covers adding the very first one.
+func (m Model) serveHost(fromPort string) string {
+	if fromPort != "" {
+		return fromPort
+	}
+	return m.local.DNSName
+}
+
 // serveURL builds the browsable URL for a path. The stored key is used
 // VERBATIM: the daemon writes a directory as "/docs/" and a file as "/motd",
 // and those are not interchangeable for a directory listing.
@@ -318,7 +328,7 @@ func (m Model) updateServeList(key string) (Model, tea.Cmd, bool) {
 		if !ok {
 			return m, nil, true
 		}
-		p := servePendingAction{port: port.Port, paths: port.Paths}
+		p := servePendingAction{host: m.serveHost(port.Host), port: port.Port, paths: port.Paths}
 		if pathIdx < 0 {
 			// A port row: removing it unmounts every path on it.
 			p.action, p.path = tailscale.ServeRemovePort, "/"
@@ -348,7 +358,7 @@ func (m Model) updateServeList(key string) (Model, tea.Cmd, bool) {
 			action = tailscale.ServeUnpublish
 		}
 		m.servePending = servePendingAction{
-			action: action, port: port.Port, path: first.Path,
+			action: action, host: m.serveHost(port.Host), port: port.Port, path: first.Path,
 			target: serveTargetArg(first), kind: first.Kind, paths: port.Paths,
 		}
 		m.state = stateServeConfirm
@@ -461,13 +471,14 @@ func (m Model) updateServeInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		kind, _ := classifyTarget(raw)
-		port, path := 443, "/"
+		port, path, host := 443, "/", m.local.DNSName
 		if p, _, ok := m.serveRowAt(m.serveCursor); ok {
 			port = p.Port
+			host = m.serveHost(p.Host)
 		}
 		m.servePending = servePendingAction{
-			action: tailscale.ServeAdd,
-			port:   port, path: path, target: raw, kind: kind,
+			action: tailscale.ServeAdd, host: host,
+			port: port, path: path, target: raw, kind: kind,
 		}
 		m.serveInputMode = false
 		m.serveInput.Blur()
@@ -602,7 +613,7 @@ func (m Model) renderServeConfirmOverlay(base string) string {
 	if p.action == tailscale.ServePublish {
 		lines = append(lines, modalLine(w, ""),
 			modalLine(w, styles.ModalDim.Render("Public URL:")),
-			modalLine(w, styles.ModalAccent.Render(serveURL(m.local.Hostname, p.port, p.path))))
+			modalLine(w, styles.ModalAccent.Render(serveURL(p.host, p.port, p.path))))
 	}
 
 	apply := "APPLY"

@@ -348,6 +348,7 @@ func mapLocal(s *status) types.LocalStatus {
 	return types.LocalStatus{
 		User:        s.login(self.UserID),
 		Hostname:    self.HostName,
+		DNSName:     strings.TrimSuffix(self.DNSName, "."),
 		LocalIP:     firstPrivateAddr(self.Addrs),
 		TailscaleIP: first(self.TailscaleIPs),
 		Conn:        localConn(s.BackendState, self),

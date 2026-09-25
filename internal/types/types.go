@@ -149,8 +149,12 @@ func (p Peer) Badge() string {
 
 // LocalStatus represents the local machine's Tailscale state.
 type LocalStatus struct {
-	User           string
-	Hostname       string
+	User     string
+	Hostname string
+	// DNSName is the node's FULL MagicDNS name ("node.tailnet.ts.net").
+	// Hostname is the short form and does not resolve on its own, so anything
+	// building a browsable URL must use this.
+	DNSName        string
 	LocalIP        string
 	TailscaleIP    string
 	Conn           ConnType

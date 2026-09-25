@@ -665,3 +665,45 @@ func TestServeAddFieldShowsExamplesThenResolution(t *testing.T) {
 		t.Fatalf("examples should give way to the resolution once typing starts")
 	}
 }
+
+// The confirmation's "Public URL" must use the full MagicDNS name too. It was
+// initially rebuilt from the short Hostname, producing a link that looks
+// plausible in the very dialog where correctness matters most.
+func TestConfirmPublicURLIsFullyQualified(t *testing.T) {
+	m := openServeModal(t, 120, 40, hostedPorts())
+	m2, _ := m.Update(key("space")) // :443 is funnelled -> unpublish; publish :8443 instead
+	_ = m2
+	m.serveCursor = 3 // the :8443 port row (tailnet-only)
+	m = m.resizeOverlay()
+	m3, _ := m.Update(key("space"))
+	got := m3.(Model)
+	if got.state != stateServeConfirm {
+		t.Fatalf("Space did not stage a publish (state=%v)", got.state)
+	}
+	view := got.View()
+	if !strings.Contains(view, "tailtui-demo.example-tailnet.ts.net") {
+		t.Fatalf("confirmation URL is not fully qualified:\n%s", view)
+	}
+	if strings.Contains(view, "https://tailtui-demo/") ||
+		strings.Contains(view, "https://tailtui-demo:") {
+		t.Fatalf("confirmation shows the short hostname, which does not resolve:\n%s", view)
+	}
+}
+
+// Adding the very first share has no existing config to take a host from, so
+// it falls back to the local node's DNSName — also the full form.
+func TestConfirmURLFallsBackToLocalDNSName(t *testing.T) {
+	m := openServeModal(t, 120, 40, nil)
+	m.local.DNSName = "tailtui-demo.example-tailnet.ts.net"
+	m2, _ := m.Update(key("a"))
+	m = m2.(Model)
+	for _, r := range "3000" {
+		m3, _ := m.Update(key(string(r)))
+		m = m3.(Model)
+	}
+	m4, _ := m.Update(key("enter"))
+	got := m4.(Model)
+	if got.servePending.host != "tailtui-demo.example-tailnet.ts.net" {
+		t.Fatalf("host fallback = %q, want the local DNSName", got.servePending.host)
+	}
+}

@@ -42,6 +42,10 @@ const (
 // would delete the share outright.
 type servePendingAction struct {
 	action tailscale.ServeAction
+	// host is the FULL MagicDNS name the confirmation shows a URL for. Carried
+	// on the action rather than rebuilt at render time, because the local
+	// node's Hostname is the short form and yields a link that does not work.
+	host   string
 	port   int
 	path   string
 	target string
