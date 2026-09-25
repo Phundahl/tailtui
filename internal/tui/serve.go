@@ -40,6 +40,7 @@ func (m Model) serveItemCount() int {
 func (m Model) openServe() Model {
 	m.state = stateServe
 	m.serveCursor = 0
+	m.serveCopied = false
 	w := overlayWidth(m.width)
 	content := m.serveBody(w)
 	m.overlay = newOverlayVP(w, overlayHeight(m.height, countLines(content)), content)
@@ -155,6 +156,8 @@ func analyzeTarget(path string) TargetRisk {
 // and those are not interchangeable for a directory listing.
 func serveURL(host string, port int, path string) string {
 	if host == "" {
+		// Only reachable before the first poll resolves; better an obviously
+		// placeholder URL than a plausible-looking one that does not work.
 		host = "this-node"
 	}
 	if port != 443 {
@@ -181,7 +184,6 @@ func (m Model) serveBody(w int) string {
 		)
 	}
 
-	host := m.local.Hostname
 	row := 0
 	var highlighted string
 
@@ -197,6 +199,7 @@ func (m Model) serveBody(w int) string {
 				plain = "[ PUBLIC ]"
 			}
 			lines = append(lines, styles.AccountActive.Render(joinRow(label, plain+" ", w)))
+			highlighted = serveURL(p.Host, p.Port, "/")
 		} else {
 			lines = append(lines, modalRow(w, styles.ModalHeading.Render(label), scope))
 		}
@@ -215,7 +218,7 @@ func (m Model) serveBody(w int) string {
 			left := fmt.Sprintf("    %-10s %s %s", sp.Path, sp.Kind.Icon(), sp.Target)
 			if m.serveCursor == row {
 				lines = append(lines, styles.AccountActive.Render(joinRow(left, "", w)))
-				highlighted = serveURL(host, p.Port, sp.Path)
+				highlighted = serveURL(p.Host, p.Port, sp.Path)
 			} else {
 				lines = append(lines, modalRow(w, styles.ModalText.Render(left), detail))
 			}
@@ -225,7 +228,9 @@ func (m Model) serveBody(w int) string {
 	}
 
 	if highlighted != "" {
-		lines = append(lines, modalDivider(w), modalLine(w, styles.ModalAccent.Render("  "+highlighted)))
+		lines = append(lines, modalDivider(w),
+			modalRow(w, styles.ModalAccent.Render("  "+highlighted),
+				styles.ModalDim.Render("[c] copy ")))
 	}
 	lines = append(lines, modalDivider(w))
 	if m.serveInputMode {
@@ -239,10 +244,20 @@ func (m Model) serveBody(w int) string {
 		}
 		lines = append(lines, modalLine(w, style.Render("  "+prompt)),
 			modalLine(w, m.serveInput.View()))
-		// Say what the typed target will actually become, before committing —
-		// naming the contents is the whole point of this feature's safety.
+		// The same space does double duty: examples while the field is empty,
+		// then what the typed target actually resolves to. No key to discover —
+		// you are in this field precisely because you do not yet know what to
+		// type, so hiding the examples behind a shortcut helps nobody.
 		if _, detail := classifyTarget(m.serveInput.Value()); detail != "" {
 			lines = append(lines, modalLine(w, styles.ModalDim.Render("  → "+detail)))
+		} else {
+			// Left-align both columns: modalRow right-justifies, which leaves
+			// the notes ragged and harder to scan than a plain padded column.
+			for _, ex := range serveExamples {
+				lines = append(lines, modalLine(w,
+					styles.ModalAccent.Render("    "+fmt.Sprintf("%-20s", ex.target))+
+						styles.ModalDim.Render(ex.note)))
+			}
 		}
 		lines = append(lines, modalDivider(w),
 			gridLine(w, accountKey("ENTER", "CONFIRM", false), accountKey("ESC", "CANCEL", false)))
@@ -251,7 +266,11 @@ func (m Model) serveBody(w int) string {
 	} else {
 		lines = append(lines,
 			gridLine(w, accountKey("J/K", "NAVIGATE", false), accountKey("A", "ADD", false)),
-			gridLine(w, accountKey("SPACE", "TAILNET/PUBLIC", false), accountKey("D", "REMOVE", false)))
+			gridLine(w, accountKey("SPACE", "TAILNET/PUBLIC", false), accountKey("D", "REMOVE", false)),
+			gridLine(w, accountKey("C", "COPY URL", false), accountKey("ESC", "CLOSE", false)))
+		if m.serveCopied {
+			lines = append(lines, modalLine(w, styles.StatusOK.Render("  ✓ URL copied to clipboard!")))
+		}
 	}
 
 	return strings.Join(lines, "\n")
@@ -259,18 +278,32 @@ func (m Model) serveBody(w int) string {
 
 // updateServeList handles navigation. Read-only: no add, remove or scope
 // toggle this phase, so every other key is swallowed rather than acted on.
-func (m Model) updateServeList(key string) (Model, bool) {
+func (m Model) updateServeList(key string) (Model, tea.Cmd, bool) {
 	switch key {
 	case "j", "down":
 		if m.serveCursor < m.serveItemCount()-1 {
 			m.serveCursor++
 		}
-		return m, true
+		return m, nil, true
 	case "k", "up":
 		if m.serveCursor > 0 {
 			m.serveCursor--
 		}
-		return m, true
+		return m, nil, true
+
+	case "c", "C":
+		// Copy the browsable URL of whatever is highlighted. Built from the
+		// daemon's own host, so it is the link you can actually paste to
+		// someone rather than a reconstructed guess.
+		port, pathIdx, ok := m.serveRowAt(m.serveCursor)
+		if !ok {
+			return m, nil, true
+		}
+		path := "/"
+		if pathIdx >= 0 {
+			path = port.Paths[pathIdx].Path
+		}
+		return m, copyCmd(clipboardServe, serveURL(port.Host, port.Port, path)), true
 
 	case "a":
 		m.serveInputMode = true
@@ -278,12 +311,12 @@ func (m Model) updateServeList(key string) (Model, bool) {
 		m.serveInput = newServeInput()
 		m.serveInput.Width = clampInputWidth(overlayWidth(m.width))
 		m.serveInput.Focus()
-		return m, true
+		return m, nil, true
 
 	case "d":
 		port, pathIdx, ok := m.serveRowAt(m.serveCursor)
 		if !ok {
-			return m, true
+			return m, nil, true
 		}
 		p := servePendingAction{port: port.Port, paths: port.Paths}
 		if pathIdx < 0 {
@@ -297,14 +330,14 @@ func (m Model) updateServeList(key string) (Model, bool) {
 		m.servePending = p
 		m.state = stateServeConfirm
 		m.serveCopied = false
-		return m, true
+		return m, nil, true
 
 	case " ", "space":
 		// Scope belongs to the PORT: AllowFunnel is keyed by host:port, so a
 		// path row has no scope of its own to toggle.
 		port, pathIdx, ok := m.serveRowAt(m.serveCursor)
 		if !ok || pathIdx >= 0 || len(port.Paths) == 0 {
-			return m, true
+			return m, nil, true
 		}
 		// Re-issuing the command needs the original target — and for
 		// unpublish it MUST be `serve`, never `funnel ... off`, which would
@@ -320,9 +353,9 @@ func (m Model) updateServeList(key string) (Model, bool) {
 		}
 		m.state = stateServeConfirm
 		m.serveCopied = false
-		return m, true
+		return m, nil, true
 	}
-	return m, false
+	return m, nil, false
 }
 
 // serveTargetArg turns a parsed path back into the argument form the CLI
@@ -354,6 +387,14 @@ func (m Model) serveRowAt(idx int) (port types.ServePort, pathIdx int, ok bool) 
 		}
 	}
 	return types.ServePort{}, -1, false
+}
+
+// serveExamples covers all three target kinds, so the field teaches the format
+// rather than assuming it is known.
+var serveExamples = []struct{ target, note string }{
+	{"3000", "a local server on port 3000"},
+	{"/srv/docs", "a directory  (needs sudo)"},
+	{"text:back at 14:00", "a literal message"},
 }
 
 // newServeInput builds the target editor, inheriting the shared styling

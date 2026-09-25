@@ -103,7 +103,7 @@ func mapServe(w serveWire) []types.ServePort {
 			}
 			p := byPort[port]
 			if p == nil {
-				p = &types.ServePort{Port: port}
+				p = &types.ServePort{Port: port, Host: hostOf(hostPort)}
 				byPort[port] = p
 			}
 			if funnel[hostPort] {
@@ -133,6 +133,16 @@ func mapServe(w serveWire) []types.ServePort {
 	}
 	sort.Slice(ports, func(i, j int) bool { return ports[i].Port < ports[j].Port })
 	return ports
+}
+
+// hostOf extracts the full MagicDNS host from a "host:port" config key. This
+// is the only reliable source for a browsable URL — the local node's Hostname
+// is the short name, without the tailnet suffix.
+func hostOf(hostPort string) string {
+	if i := strings.LastIndex(hostPort, ":"); i >= 0 {
+		return hostPort[:i]
+	}
+	return hostPort
 }
 
 // portOf extracts the listening port from a "host:port" config key.

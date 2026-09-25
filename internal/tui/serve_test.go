@@ -576,3 +576,92 @@ func TestConfirmFitsMinimumTerminal(t *testing.T) {
 		t.Fatalf("keymap dropped at 72x24:\n%s", view)
 	}
 }
+
+// --- URL and copy -------------------------------------------------------------
+
+func hostedPorts() []types.ServePort {
+	p := servePorts()
+	for i := range p {
+		p[i].Host = "tailtui-demo.example-tailnet.ts.net"
+	}
+	return p
+}
+
+// The URL must come from the daemon's own config key. Rebuilding it from the
+// local node's Hostname yields the SHORT name and a link that does not resolve.
+func TestServeURLUsesFullMagicDNSHost(t *testing.T) {
+	m := openServeModal(t, 120, 40, hostedPorts())
+	view := m.View()
+	if !strings.Contains(view, "https://tailtui-demo.example-tailnet.ts.net/") {
+		t.Fatalf("URL must use the full MagicDNS host from the config:\n%s", view)
+	}
+	// A short hostname alone would be a broken link.
+	if strings.Contains(view, "https://tailtui-demo/") {
+		t.Fatalf("URL was rebuilt from the short hostname and will not resolve")
+	}
+}
+
+func TestServeURLFollowsTheCursor(t *testing.T) {
+	m := openServeModal(t, 120, 40, hostedPorts())
+	for i, want := range []string{
+		"https://tailtui-demo.example-tailnet.ts.net/",      // :443 port row
+		"https://tailtui-demo.example-tailnet.ts.net/",      // /
+		"https://tailtui-demo.example-tailnet.ts.net/api",   // /api
+		"https://tailtui-demo.example-tailnet.ts.net:8443/", // :8443 port row
+	} {
+		if i > 0 {
+			m2, _ := m.Update(key("j"))
+			m = m2.(Model)
+		}
+		if !strings.Contains(m.View(), want) {
+			t.Fatalf("row %d: expected URL %q:\n%s", i, want, m.View())
+		}
+	}
+}
+
+func TestServeCopyURLDispatches(t *testing.T) {
+	m := openServeModal(t, 120, 40, hostedPorts())
+	m2, cmd := m.Update(key("c"))
+	if cmd == nil {
+		t.Fatalf("[c] did not dispatch a clipboard command")
+	}
+	if got := m2.(Model).state; got != stateServe {
+		t.Fatalf("[c] should stay in the list, got %v", got)
+	}
+	m3, _ := m2.(Model).Update(clipboardMsg{kind: clipboardServe})
+	if !m3.(Model).serveCopied {
+		t.Fatalf("clipboardServe did not set the copied flag")
+	}
+	if !strings.Contains(m3.(Model).View(), "copied") {
+		t.Fatalf("copy confirmation not shown:\n%s", m3.(Model).View())
+	}
+}
+
+// The add field teaches the format while empty, and switches to the live
+// resolution once typing starts — the same space doing both jobs.
+func TestServeAddFieldShowsExamplesThenResolution(t *testing.T) {
+	m := openServeModal(t, 120, 40, nil)
+	m2, _ := m.Update(key("a"))
+	m = m2.(Model)
+
+	view := m.View()
+	for _, want := range []string{"3000", "/srv/docs", "text:back at 14:00"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("empty add field should show the example %q:\n%s", want, view)
+		}
+	}
+
+	// Type through Update: the modal body is re-rendered into the viewport on
+	// each keystroke, so setting the value directly would not refresh it.
+	for _, r := range "3000" {
+		m2, _ := m.Update(key(string(r)))
+		m = m2.(Model)
+	}
+	view = m.View()
+	if !strings.Contains(view, "proxy to 3000") {
+		t.Fatalf("typing should show what the target resolves to:\n%s", view)
+	}
+	if strings.Contains(view, "a literal message") {
+		t.Fatalf("examples should give way to the resolution once typing starts")
+	}
+}

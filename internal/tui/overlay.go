@@ -359,8 +359,8 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case stateServe:
 		// Read-only this phase: navigation only. Every other key is swallowed
 		// so nothing falls through to the peer list behind the modal.
-		if nm, handled := m.updateServeList(key); handled {
-			return nm.resizeOverlay(), nil
+		if nm, cmd, handled := m.updateServeList(key); handled {
+			return nm.resizeOverlay(), cmd
 		}
 		return m, nil
 	}

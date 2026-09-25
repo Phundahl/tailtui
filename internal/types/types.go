@@ -248,6 +248,11 @@ type ServePath struct {
 // Funnel is per-port, not per-path: it is keyed by host:port in the daemon's
 // config, so enabling it exposes EVERY path in Paths to the public internet.
 type ServePort struct {
+	// Host is the full MagicDNS name the daemon serves on, taken verbatim from
+	// its config key (e.g. "node.tailnet.ts.net"). Kept rather than rebuilt
+	// from the local hostname, which is the SHORT name and yields a URL that
+	// does not resolve.
+	Host   string
 	Port   int
 	HTTPS  bool
 	Funnel bool
