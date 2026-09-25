@@ -5,6 +5,31 @@ Every released version of `tailTUI`, newest first.
 The project began on 2026-05-29; anything before v1.1.0 lives in the commit log
 rather than here. Dates are the release dates.
 
+## v1.5.0 — 2026-09-25
+
+*Serve & Funnel*
+
+- **Share a local service from the TUI.** `F` opens Serve & Funnel: `a` adds a
+  port, directory or text, `d` removes it, and `Space` switches a port between
+  tailnet-only and public. Every change is previewed as the exact command
+  before it runs.
+- **The confirmation names what you are exposing, and to whom.** A directory is
+  inspected first, so sharing one that holds `.ssh` or `.env` says so in as many
+  words; going public lists every path on that port, because Funnel is a
+  property of the port rather than the path. It warns — it never refuses.
+- **Getting back to private is spelled out.** A public entry is flagged under
+  its URL and the key is labelled `MAKE PRIVATE`, not a generic toggle, because
+  undoing exposure should be the most obvious thing in the view.
+- **`c` copies the entry's real URL** — built from the daemon's own hostname, so
+  it is the link you can actually send to someone.
+- **`r` re-reads the daemon and logs what it found**, with counts, so you can
+  confirm a change landed instead of trusting the screen.
+- **A live Funnel no longer floods the node list.** Tailscale adds roughly two
+  dozen of its own ingress nodes while a funnel is up; they are kept out of the
+  list, which says how many it is hiding, and `/` still finds them.
+- **Anything public is flagged on the dashboard**, because the real hazard is
+  forgetting a Funnel is still running.
+
 ## v1.4.0 — 2026-09-17
 
 *SSH launcher*

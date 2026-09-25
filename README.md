@@ -30,18 +30,20 @@ for the opposite workflow:
   the real terminal when they need it, then the UI restores itself the moment
   they exit.
 
-## What's New in v1.4.0
+## What's New in v1.5.0
 
-- **SSH straight from the node list.** Highlight a peer, press `s`, and a
-  launcher shows the target, an editable username, and the exact command about
-  to run. `Enter` hands your terminal to `tailscale ssh`; `tailTUI` restores
-  itself the moment the session ends. `c` copies the command instead.
-- **Nodes running Tailscale SSH are marked**, read live from the daemon at no
-  extra cost. The launcher still opens on *any* online peer — a node without
-  Tailscale SSH may well be reachable through its own `sshd`, and the modal
-  tells you which case you are in before anything runs.
-- **`[O] Operator` retires once it is done**, freeing the footer space for
-  `[s] SSH`.
+- **Serve & Funnel, from the TUI.** `F` lists what this node shares; `a` adds a
+  port, directory or text, `d` removes it, `Space` switches a port between
+  tailnet-only and public. Every change is previewed as the exact command first.
+- **The confirmation names what you are exposing, and to whom.** A directory is
+  inspected before it is shared, so one holding `.ssh` or `.env` says so; going
+  public lists every path on that port. It warns, it never refuses.
+- **Getting back to private is spelled out** — a public entry is flagged under
+  its URL and the key reads `MAKE PRIVATE`, not a generic toggle.
+- **`c` copies the entry's real URL, `r` re-reads the daemon** and logs the
+  counts it found, so you can confirm a change actually landed.
+- **A live Funnel no longer floods the node list** with Tailscale's ingress
+  nodes; the list says how many it is hiding, and `/` still finds them.
 
 Every release is in **[CHANGELOG.md](CHANGELOG.md)**.
 
