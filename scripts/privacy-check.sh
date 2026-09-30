@@ -112,6 +112,73 @@ if [ "${#commit_range[@]}" -gt 0 ] || [ -n "${PRIVACY_CHECK_COMMIT_RANGE:-}" ]; 
   fi
 fi
 
+# 5. Hostnames in a HOST position, checked against an ALLOWLIST rather than a
+#    pattern. Checks 1-3 recognise a *shape*; this one recognises nothing and
+#    demands the value be one we have already approved.
+#
+#    Why it exists: a bare node name has no shape. "labnode-x" is textually
+#    identical to the fixture names, and writing a MagicDNS name with the
+#    tailnet redacted ("labnode-x.<tailnet>.ts.net") breaks check 2's pattern
+#    outright — a half-redaction is less detectable than no redaction.
+#
+#    Why it is scoped to URLs, `ssh user@host` and *.ts.net: treating every
+#    kebab-case token as a candidate yields ~630 of them in this repo, nearly
+#    all ordinary prose ("top-level", "off-thread"). Scoped, it is ~20. A check
+#    that fires on ordinary work is one people learn to dismiss, which is the
+#    same reason analyzeTarget matches system dirs exactly and never by prefix.
+#
+#    This still names only what is PERMITTED, never what is forbidden, so the
+#    guard continues not to leak the thing it protects. Adding an entry should
+#    be a deliberate act: that is the feature, not the friction.
+#
+#    The list is NOT just the mock vocabulary. It is three kinds of thing:
+#      - real third-party services this repo legitimately links to (GitHub,
+#        Tailscale, the AUR, Charm, Nerd Fonts) — the largest group, and the
+#        reason a mock-only allowlist would reject the README outright;
+#      - the fictional vocabularies: mock.go's own domain, plus the
+#        example-tailnet names used in tests and docs;
+#      - documentation placeholders such as the host in "[user@]host".
+#    Keep it free of entries nothing references: an unused allowance widens
+#    the check for no benefit, and re-adding one later is a single line.
+ALLOWED_HOSTS='^(
+localhost|127\.0\.0\.1|
+github\.com|api\.github\.com|raw\.githubusercontent\.com|users\.noreply\.github\.com|
+tailscale\.com|charm\.sh|aur\.archlinux\.org|omarchy\.org|www\.nerdfonts\.com|
+host|user|
+tailtui-demo|
+([a-z0-9-]+\.)*tailtui\.dev|
+([a-z0-9-]+\.)*example-tailnet\.ts\.net|
+([a-z0-9-]+\.)*tailnet\.ts\.net
+)$'
+allowed_re="$(printf '%s' "$ALLOWED_HOSTS" | tr -d '\n')"
+
+# Pulls every token sitting where a hostname goes, normalised for comparison.
+extract_hosts() {
+  grep -hIoE -e 'https?://[A-Za-z0-9._-]+' \
+             -e 'ssh [A-Za-z0-9._-]+@[A-Za-z0-9._-]+' \
+             -e '[A-Za-z0-9._-]+\.ts\.net' "$@" 2>/dev/null \
+  | sed -E 's#^https?://##; s#^ssh [^@]*@##' \
+  | sed -E 's/^[.-]+//; s/[.-]+$//' \
+  | tr 'A-Z' 'a-z' | sort -u | grep -v '^$'
+}
+
+if out=$(extract_hosts "${files[@]}" | grep -vE "$allowed_re"); then
+  note "Host not on the allowlist — if it is legitimate, add it to ALLOWED_HOSTS."
+  echo "$out"
+fi
+
+# 6. The same allowlist over commit MESSAGES. Check 4 validates who authored a
+#    commit; it does not read what the message says, and a message body is as
+#    public as a file. This is the gap that mattered in practice.
+if [ "${#commit_range[@]}" -gt 0 ]; then
+  msgs="$(mktemp)"; trap 'rm -f "$msgs"' EXIT
+  git log --format='%B' "${commit_range[@]}" > "$msgs" 2>/dev/null
+  if out=$(extract_hosts "$msgs" | grep -vE "$allowed_re"); then
+    note "Host not on the allowlist in a commit message."
+    echo "$out"
+  fi
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "privacy-check: clean"
 fi
