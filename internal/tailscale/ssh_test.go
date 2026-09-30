@@ -16,7 +16,7 @@ func TestSSHTarget(t *testing.T) {
 		{"empty user yields bare host", "", "srv-web-01.tailtui.dev", "srv-web-01.tailtui.dev"},
 		{"whitespace user is empty", "   ", "srv-web-01.tailtui.dev", "srv-web-01.tailtui.dev"},
 		{"trailing dot trimmed", "root", "field-laptop.example-tailnet.ts.net.", "root@field-laptop.example-tailnet.ts.net"},
-		{"surrounding space trimmed", "  root  ", "  host.ts.net  ", "root@host.ts.net"},
+		{"surrounding space trimmed", "  root  ", "  host.tailnet.ts.net  ", "root@host.tailnet.ts.net"},
 		{"bare ip target", "", "100.64.0.20", "100.64.0.20"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
