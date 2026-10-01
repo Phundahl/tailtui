@@ -194,6 +194,11 @@ terminal with a
 support is recommended but not required — the theme degrades gracefully to
 ANSI on 256-color terminals.
 
+**Tailscale version:** developed and verified against **Tailscale 1.102.3**.
+No minimum is declared because none has been established by testing — but
+Serve & Funnel in particular rely on the modern `serve`/`funnel` CLI and the
+shape of its `--json` output, so a noticeably older daemon may not work.
+
 > **Trying it out without a Tailnet?** Set `TAILTUI_MOCK=1` and `tailTUI`
 > runs against an in-memory anonymized fixture (7 fictional nodes, 2 mock
 > accounts, a synthetic live latency wave) without ever invoking the real
